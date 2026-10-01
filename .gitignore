@@ -1,0 +1,28 @@
+# ROS 2 / colcon
+ros_ws/build/
+ros_ws/install/
+ros_ws/log/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / rosbag
+*.log
+rosbag2_*/
+
+# Generated temporary maps
+ros_ws/src/serving_robot_navigation/maps/generated/*
+!ros_ws/src/serving_robot_navigation/maps/generated/.gitkeep
