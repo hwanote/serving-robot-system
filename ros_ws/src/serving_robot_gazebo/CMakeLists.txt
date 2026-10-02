@@ -9,6 +9,7 @@ install(
     worlds
     models
     launch
+    config
   DESTINATION share/${PROJECT_NAME}
   PATTERN ".gitkeep" EXCLUDE
 )
