@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<package format="3">
+
+  <name>serving_robot_navigation</name>
+  <version>0.1.0</version>
+
+  <description>
+    Mapping, localization, navigation, and collision monitoring
+    configuration for the serving robot system.
+  </description>
+
+  <maintainer email="notihwan08@gmail.com">hwanote</maintainer>
+
+  <license>TODO</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <exec_depend>slam_toolbox</exec_depend>
+
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_collision_monitor</exec_depend>
+
+  <exec_depend>tf2_ros</exec_depend>
+
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>
