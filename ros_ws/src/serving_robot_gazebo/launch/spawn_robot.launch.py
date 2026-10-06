@@ -31,7 +31,10 @@ def generate_launch_description():
     )
 
     robot_description = xacro.process_file(
-        xacro_file
+        xacro_file,
+        mappings={
+            'robot_name': 'robot_01',
+        },
     ).toxml()
 
     robot_state_publisher = Node(
@@ -57,8 +60,8 @@ def generate_launch_description():
             '-string', robot_description,
             '-name', 'robot_01',
             '-allow_renaming', 'false',
-            '-x', '0.0',
-            '-y', '0.0',
+            '-x', '-3.2',
+            '-y', '-2.25',
             '-z', '0.02',
             '-Y', '0.0',
         ],
