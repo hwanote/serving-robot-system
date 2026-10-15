@@ -42,6 +42,9 @@ setup(
                 "exploration_manager = "
                 "serving_robot_mapping.exploration_manager:main"
             ),
+            "frontier_visualizer = serving_robot_mapping.frontier_visualizer:main",
+            "frontier_goal_visualizer = serving_robot_mapping.frontier_goal_visualizer:main",
+            "frontier_path_checker = serving_robot_mapping.frontier_path_checker:main",
         ],
     },
 )
