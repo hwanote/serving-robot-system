@@ -6,8 +6,17 @@ from typing import Optional
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import OccupancyGrid, Odometry, Path
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
+from visualization_msgs.msg import Marker
 from rclpy.node import Node
 
+from serving_robot_mapping.planner_action_client import (
+    FrontierPlanningClient,
+)
 from serving_robot_mapping.frontier_detector import FrontierDetector
 from serving_robot_mapping.exploration_goal_manager import (
     ExplorationGoalManager,
@@ -90,6 +99,16 @@ class ExplorationManager(Node):
             "/mapping/frontier_valid_path"
         )
         self.declare_parameter(
+            "planning.enabled", False
+        )
+        self.declare_parameter(
+            "planning.action", "/compute_path_to_pose"
+        )
+        self.declare_parameter(
+            "topics.frontier_goals",
+            "/mapping/frontier_goals"
+        )
+        self.declare_parameter(
             "frontier.min_size_m", 0.40
         )
         self.declare_parameter(
@@ -155,6 +174,20 @@ class ExplorationManager(Node):
                     "completion.stable_time_s"
                 ).value
             ),
+        )
+
+        self.planning_enabled = bool(
+            self.get_parameter("planning.enabled").value
+        )
+
+        self.planner_verified_goal = None
+
+        self.planner_client = FrontierPlanningClient(
+            node=self,
+            action_name=str(
+                self.get_parameter("planning.action").value
+            ),
+            on_verified=self.planner_results_callback,
         )
 
         self.last_frontier_count = None
@@ -228,6 +261,28 @@ class ExplorationManager(Node):
             10,
         )
 
+        marker_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+
+        self.frontier_goals_sub = self.create_subscription(
+            Marker,
+            str(
+                self.get_parameter(
+                    "topics.frontier_goals"
+                ).value
+            ),
+            self.planner_client.update_candidates,
+            marker_qos,
+        )
+
+        self.planning_timer = self.create_timer(
+            1.0,
+            self.planning_loop,
+        )
+
         self.control_timer = self.create_timer(
             0.05,
             self.control_loop,
@@ -258,6 +313,50 @@ class ExplorationManager(Node):
             current_yaw=yaw,
             angular_velocity=msg.twist.twist.angular.z,
         )
+
+    def planner_results_callback(self, verified_goals):
+        """Store direct action results for preview only."""
+
+        self.planner_verified_goal = None
+
+        if self.state_machine.state != MappingState.EXPLORING:
+            return
+
+        if not self.last_frontier_count:
+            return
+
+        selected = self.goal_manager.select_goal(
+            verified_goals
+        )
+
+        if selected is None:
+            return
+
+        self.planner_verified_goal = selected
+
+        self.get_logger().info(
+            "ACTION-VERIFIED PREVIEW: "
+            f"({selected.x:.2f}, {selected.y:.2f}), "
+            f"path={selected.path_length_m:.2f} m"
+        )
+
+        self.get_logger().info(
+            "Navigation remains disabled."
+        )
+
+    def planning_loop(self):
+        """Run planning only when explicitly enabled."""
+
+        if not self.planning_enabled:
+            return
+
+        if self.state_machine.state != MappingState.EXPLORING:
+            return
+
+        if not self.last_frontier_count:
+            return
+
+        self.planner_client.tick()
 
     def validated_path_callback(self, msg: Path) -> None:
         """Preview a planner-validated goal without navigating."""
@@ -359,6 +458,7 @@ class ExplorationManager(Node):
 
         if frontier_count == 0:
             self.pending_goal = None
+            self.planner_verified_goal = None
 
         previous_state = self.state_machine.state
 
