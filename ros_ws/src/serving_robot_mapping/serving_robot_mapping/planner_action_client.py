@@ -11,6 +11,10 @@ from nav2_msgs.action import ComputePathToPose
 from rclpy.action import ActionClient
 from visualization_msgs.msg import Marker
 
+from action_msgs.msg import GoalStatus
+from serving_robot_mapping.frontier_failure_memory import (
+    FrontierFailureMemory,
+)
 from serving_robot_mapping.path_result_validator import (
     PathResultValidator,
 )
@@ -28,6 +32,7 @@ class FrontierPlanningClient:
         freshness_monitor=None,
         context_ready=None,
         replanning_policy=None,
+        failure_memory=None,
     ):
         if request_timeout_s <= 0:
             raise ValueError("Request timeout must be positive")
@@ -39,6 +44,14 @@ class FrontierPlanningClient:
         self.freshness_monitor = freshness_monitor
         self.context_ready = context_ready
         self.replanning_policy = replanning_policy
+        self.failure_memory = (
+            failure_memory
+            if failure_memory is not None
+            else FrontierFailureMemory(
+                match_radius_m=0.25,
+                max_failures=3,
+            )
+        )
         self.last_seen_map_revision = None
         self.active_snapshot = None
         self.approved_snapshot = None
@@ -291,6 +304,21 @@ class FrontierPlanningClient:
         if not self.candidates:
             return
 
+        eligible_candidates = (
+            self.failure_memory.available_candidates(
+                self.candidates
+            )
+        )
+
+        if not eligible_candidates:
+            if self.completed_signature != self.signature:
+                self.node.get_logger().warn(
+                    "All frontier candidates blocked "
+                    "by failure memory."
+                )
+                self.completed_signature = self.signature
+            return
+
         if self.replanning_policy is not None:
             decision = self.replanning_policy.decision(
                 time.monotonic()
@@ -349,7 +377,9 @@ class FrontierPlanningClient:
         self.busy = True
 
         self.active_signature = self.signature
-        self.active_candidates = tuple(self.candidates)
+        self.active_candidates = tuple(
+            eligible_candidates
+        )
         self.index = 0
         self.verified = []
 
@@ -367,6 +397,14 @@ class FrontierPlanningClient:
             or self.active_signature != self.signature
         ):
             return
+
+        while (
+            self.index < len(self.active_candidates)
+            and self.failure_memory.is_blocked(
+                *self.active_candidates[self.index]
+            )
+        ):
+            self.index += 1
 
         if self.index >= len(self.active_candidates):
             if self.freshness_monitor is not None:
@@ -531,6 +569,11 @@ class FrontierPlanningClient:
             )
 
             if outcome.valid and outcome.goal is not None:
+                self.failure_memory.record_success(
+                    requested_pose.pose.position.x,
+                    requested_pose.pose.position.y,
+                )
+
                 self.verified.append(outcome.goal)
 
                 self.node.get_logger().info(
@@ -544,6 +587,33 @@ class FrontierPlanningClient:
                     "Planner validation failed: "
                     f"{outcome.reason}"
                 )
+
+                if (
+                    response.status == GoalStatus.STATUS_ABORTED
+                    and response.result.error_code
+                    == ComputePathToPose.Result.NO_VALID_PATH
+                ):
+                    x = requested_pose.pose.position.x
+                    y = requested_pose.pose.position.y
+
+                    failures = (
+                        self.failure_memory.record_failure(
+                            x, y
+                        )
+                    )
+
+                    self.node.get_logger().warn(
+                        "Frontier planning failure: "
+                        f"({x:.2f}, {y:.2f}), "
+                        f"count={failures}/"
+                        f"{self.failure_memory.max_failures}"
+                    )
+
+                    if self.failure_memory.is_blocked(x, y):
+                        self.node.get_logger().warn(
+                            "Frontier area blocked after "
+                            "repeated NO_VALID_PATH results."
+                        )
 
         except Exception as exc:
             self.node.get_logger().error(
