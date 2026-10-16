@@ -5,9 +5,14 @@ from typing import Optional
 
 import rclpy
 from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from rclpy.node import Node
 
+from serving_robot_mapping.frontier_detector import FrontierDetector
+from serving_robot_mapping.exploration_goal_manager import (
+    ExplorationGoalManager,
+    VerifiedFrontierGoal,
+)
 from serving_robot_mapping.mapping_state_machine import (
     MappingState,
     MappingStateMachine,
@@ -74,6 +79,29 @@ class ExplorationManager(Node):
             2.0 * math.pi,
         )
 
+        self.declare_parameter(
+            "initial_scan.skip", False
+        )
+        self.declare_parameter(
+            "topics.map", "/map"
+        )
+        self.declare_parameter(
+            "topics.validated_path",
+            "/mapping/frontier_valid_path"
+        )
+        self.declare_parameter(
+            "frontier.min_size_m", 0.40
+        )
+        self.declare_parameter(
+            "frontier.free_threshold", 25
+        )
+        self.declare_parameter(
+            "completion.no_frontier_cycles", 5
+        )
+        self.declare_parameter(
+            "completion.stable_time_s", 10.0
+        )
+
         self.robot_id = self.get_parameter(
             "robot_id"
         ).value
@@ -93,6 +121,50 @@ class ExplorationManager(Node):
         )
 
         self.state_machine = MappingStateMachine()
+
+        self.skip_initial_scan = bool(
+            self.get_parameter("initial_scan.skip").value
+        )
+
+        self.map_topic = str(
+            self.get_parameter("topics.map").value
+        )
+
+        self.frontier_detector = FrontierDetector(
+            min_size_m=float(
+                self.get_parameter(
+                    "frontier.min_size_m"
+                ).value
+            ),
+            free_threshold=int(
+                self.get_parameter(
+                    "frontier.free_threshold"
+                ).value
+            ),
+        )
+
+        self.goal_manager = ExplorationGoalManager(
+            state_machine=self.state_machine,
+            no_frontier_cycles=int(
+                self.get_parameter(
+                    "completion.no_frontier_cycles"
+                ).value
+            ),
+            stable_time_s=float(
+                self.get_parameter(
+                    "completion.stable_time_s"
+                ).value
+            ),
+        )
+
+        self.last_frontier_count = None
+        self.pending_goal = None
+
+        self.validated_path_topic = str(
+            self.get_parameter(
+                "topics.validated_path"
+            ).value
+        )
 
         self.current_yaw: Optional[float] = None
 
@@ -142,6 +214,20 @@ class ExplorationManager(Node):
             20,
         )
 
+        self.map_sub = self.create_subscription(
+            OccupancyGrid,
+            self.map_topic,
+            self.map_callback,
+            10,
+        )
+
+        self.validated_path_sub = self.create_subscription(
+            Path,
+            self.validated_path_topic,
+            self.validated_path_callback,
+            10,
+        )
+
         self.control_timer = self.create_timer(
             0.05,
             self.control_loop,
@@ -173,6 +259,130 @@ class ExplorationManager(Node):
             angular_velocity=msg.twist.twist.angular.z,
         )
 
+    def validated_path_callback(self, msg: Path) -> None:
+        """Preview a planner-validated goal without navigating."""
+
+        if self.state_machine.state != MappingState.EXPLORING:
+            return
+
+        if not self.last_frontier_count:
+            return
+
+        if msg.header.frame_id != "map":
+            return
+
+        if len(msg.poses) < 2:
+            return
+
+        length = 0.0
+
+        for previous, current in zip(
+            msg.poses, msg.poses[1:]
+        ):
+            a = previous.pose.position
+            b = current.pose.position
+
+            if not all(
+                math.isfinite(v)
+                for v in (a.x, a.y, b.x, b.y)
+            ):
+                return
+
+            length += math.hypot(
+                b.x - a.x,
+                b.y - a.y,
+            )
+
+        endpoint = msg.poses[-1].pose.position
+
+        candidate = VerifiedFrontierGoal(
+            x=endpoint.x,
+            y=endpoint.y,
+            path_length_m=length,
+        )
+
+        selected = self.goal_manager.select_goal(
+            [candidate]
+        )
+
+        if selected is None or selected == self.pending_goal:
+            return
+
+        self.pending_goal = selected
+
+        self.get_logger().info(
+            "Path candidate received: "
+            f"({selected.x:.2f}, {selected.y:.2f}), "
+            f"length={selected.path_length_m:.2f} m"
+        )
+
+        self.get_logger().info(
+            "PREVIEW ONLY: Navigation is disabled."
+        )
+
+    def map_callback(self, msg: OccupancyGrid) -> None:
+        """Update exploration state from live map observations."""
+
+        state = self.state_machine.state
+
+        if state not in (
+            MappingState.EXPLORING,
+            MappingState.COMPLETION_CHECK,
+        ):
+            return
+
+        width = int(msg.info.width)
+        height = int(msg.info.height)
+        resolution = float(msg.info.resolution)
+
+        # Never assess completion on a map with no known-free area.
+        if not any(
+            0 <= value <= self.frontier_detector.free_threshold
+            for value in msg.data
+        ):
+            return
+
+        try:
+            clusters = self.frontier_detector.detect(
+                data=msg.data,
+                width=width,
+                height=height,
+                resolution=resolution,
+            )
+        except ValueError as exc:
+            self.get_logger().warn(
+                f"Invalid map for frontier detection: {exc}"
+            )
+            return
+
+        frontier_count = len(clusters)
+
+        if frontier_count == 0:
+            self.pending_goal = None
+
+        previous_state = self.state_machine.state
+
+        current_state = self.goal_manager.observe_frontiers(
+            frontier_count=frontier_count,
+            now_s=(
+                self.get_clock().now().nanoseconds / 1e9
+            ),
+        )
+
+        if frontier_count != self.last_frontier_count:
+            self.get_logger().info(
+                f"Frontier clusters: {frontier_count}"
+            )
+            self.last_frontier_count = frontier_count
+
+        if current_state != previous_state:
+            self.get_logger().info(
+                f"State: {previous_state.value} "
+                f"-> {current_state.value}"
+            )
+
+        # No navigation command is issued here.
+
     def control_loop(self) -> None:
         """Run behavior for the active mapping state."""
         if self.current_yaw is None:
@@ -188,7 +398,20 @@ class ExplorationManager(Node):
             self.run_initial_scan()
 
     def start_initial_scan(self) -> None:
-        """Request the generic controller to rotate 360 degrees."""
+        """Request initial rotation or enter observation-only mode."""
+
+        if self.skip_initial_scan:
+            self.state_machine.transition_to(
+                MappingState.EXPLORING
+            )
+            self.get_logger().info(
+                "TEST MODE: Initial scan skipped."
+            )
+            self.get_logger().info(
+                "State: IDLE -> EXPLORING"
+            )
+            return
+
         self.state_machine.transition_to(
             MappingState.INITIAL_SCAN
         )
