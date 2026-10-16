@@ -1,6 +1,7 @@
 """Autonomous mapping workflow manager."""
 
 import math
+import time
 from typing import Optional
 
 import rclpy
@@ -12,10 +13,15 @@ from rclpy.qos import (
     ReliabilityPolicy,
 )
 from visualization_msgs.msg import Marker
+from rclpy.time import Time
+from tf2_ros import Buffer, TransformException, TransformListener
 from rclpy.node import Node
 
 from serving_robot_mapping.planner_action_client import (
     FrontierPlanningClient,
+)
+from serving_robot_mapping.planning_freshness import (
+    PlanningFreshnessMonitor,
 )
 from serving_robot_mapping.frontier_detector import FrontierDetector
 from serving_robot_mapping.exploration_goal_manager import (
@@ -102,6 +108,15 @@ class ExplorationManager(Node):
             "planning.enabled", False
         )
         self.declare_parameter(
+            "planning.max_age_s", 10.0
+        )
+        self.declare_parameter(
+            "planning.max_translation_m", 0.15
+        )
+        self.declare_parameter(
+            "planning.max_rotation_deg", 15.0
+        )
+        self.declare_parameter(
             "planning.action", "/compute_path_to_pose"
         )
         self.declare_parameter(
@@ -140,6 +155,34 @@ class ExplorationManager(Node):
         )
 
         self.state_machine = MappingStateMachine()
+
+        self.freshness_monitor = PlanningFreshnessMonitor(
+            max_age_s=float(
+                self.get_parameter(
+                    "planning.max_age_s"
+                ).value
+            ),
+            max_translation_m=float(
+                self.get_parameter(
+                    "planning.max_translation_m"
+                ).value
+            ),
+            max_rotation_rad=math.radians(
+                float(
+                    self.get_parameter(
+                        "planning.max_rotation_deg"
+                    ).value
+                )
+            ),
+        )
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(
+            self.tf_buffer, self
+        )
+
+        self.freshness_context_ready = False
+        self.freshness_tf_missing = False
 
         self.skip_initial_scan = bool(
             self.get_parameter("initial_scan.skip").value
@@ -188,6 +231,8 @@ class ExplorationManager(Node):
                 self.get_parameter("planning.action").value
             ),
             on_verified=self.planner_results_callback,
+            freshness_monitor=self.freshness_monitor,
+            context_ready=lambda: self.freshness_context_ready,
         )
 
         self.last_frontier_count = None
@@ -281,6 +326,11 @@ class ExplorationManager(Node):
         self.planning_timer = self.create_timer(
             1.0,
             self.planning_loop,
+        )
+
+        self.freshness_timer = self.create_timer(
+            1.0,
+            self.freshness_observation_loop,
         )
 
         self.control_timer = self.create_timer(
@@ -419,8 +469,116 @@ class ExplorationManager(Node):
             "PREVIEW ONLY: Navigation is disabled."
         )
 
+    def freshness_observation_loop(self) -> None:
+        """Observe map-frame robot pose without commanding motion."""
+
+        if self.state_machine.state not in (
+            MappingState.EXPLORING,
+            MappingState.COMPLETION_CHECK,
+        ):
+            return
+
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                "map",
+                "base_footprint",
+                Time(),
+            )
+
+        except TransformException as exc:
+            if not self.freshness_tf_missing:
+                self.get_logger().warn(
+                    f"Freshness TF unavailable: {exc}"
+                )
+                self.freshness_tf_missing = True
+
+            self.freshness_context_ready = False
+            return
+
+        self.freshness_tf_missing = False
+
+        position = transform.transform.translation
+        orientation = transform.transform.rotation
+
+        yaw = quaternion_to_yaw(
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w,
+        )
+
+        self.freshness_monitor.update_robot_pose(
+            x=position.x,
+            y=position.y,
+            yaw=yaw,
+        )
+
+        if not self.freshness_context_ready:
+            try:
+                snapshot = self.freshness_monitor.capture(
+                    now_s=time.monotonic()
+                )
+
+            except RuntimeError:
+                return
+
+            self.get_logger().info(
+                "Planning context ready: "
+                f"map revision={snapshot.map_revision}, "
+                f"robot=({snapshot.robot_x:.2f}, "
+                f"{snapshot.robot_y:.2f}), "
+                f"yaw={math.degrees(snapshot.robot_yaw):.1f} deg"
+            )
+
+            self.get_logger().info(
+                "Freshness monitoring only; "
+                "navigation remains disabled."
+            )
+
+            self.freshness_context_ready = True
+
     def map_callback(self, msg: OccupancyGrid) -> None:
-        """Update exploration state from live map observations."""
+        """Update map freshness and exploration observations."""
+
+        if msg.header.frame_id not in ("", "map"):
+            self.get_logger().warn(
+                "Ignoring map with unexpected frame: "
+                f"{msg.header.frame_id}"
+            )
+            return
+
+        origin = msg.info.origin
+        q = origin.orientation
+
+        origin_yaw = quaternion_to_yaw(
+            q.x, q.y, q.z, q.w
+        )
+
+        try:
+            changed = self.freshness_monitor.update_map(
+                data=msg.data,
+                width=int(msg.info.width),
+                height=int(msg.info.height),
+                resolution=float(msg.info.resolution),
+                origin_x=origin.position.x,
+                origin_y=origin.position.y,
+                origin_yaw=origin_yaw,
+            )
+
+        except (ValueError, OverflowError) as exc:
+            self.get_logger().warn(
+                f"Map freshness update failed: {exc}"
+            )
+            return
+
+        if changed:
+            revision = self.freshness_monitor.map_revision
+
+            # Avoid flooding the terminal during active SLAM.
+            if revision == 1 or revision % 10 == 0:
+                self.get_logger().info(
+                    f"Map content revision: {revision}"
+                )
 
         state = self.state_machine.state
 

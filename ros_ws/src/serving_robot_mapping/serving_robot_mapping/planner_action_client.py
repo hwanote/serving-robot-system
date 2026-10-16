@@ -25,6 +25,8 @@ class FrontierPlanningClient:
         action_name,
         on_verified,
         request_timeout_s=10.0,
+        freshness_monitor=None,
+        context_ready=None,
     ):
         if request_timeout_s <= 0:
             raise ValueError("Request timeout must be positive")
@@ -32,6 +34,12 @@ class FrontierPlanningClient:
         self.node = node
         self.on_verified = on_verified
         self.request_timeout_s = request_timeout_s
+
+        self.freshness_monitor = freshness_monitor
+        self.context_ready = context_ready
+        self.active_snapshot = None
+        self.approved_snapshot = None
+        self.context_wait_logged = False
 
         self.client = ActionClient(
             node,
@@ -61,6 +69,44 @@ class FrontierPlanningClient:
         self.deadline_s = None
         self.active_handle = None
 
+    def context_status(self, snapshot):
+        """Check the original map/pose/time of a request."""
+
+        if self.freshness_monitor is None:
+            return True, "Freshness monitor disabled"
+
+        if (
+            self.context_ready is not None
+            and not self.context_ready()
+        ):
+            return False, "Map-frame robot TF unavailable"
+
+        if snapshot is None:
+            return False, "Planning snapshot unavailable"
+
+        return self.freshness_monitor.validate(
+            snapshot,
+            time.monotonic(),
+        )
+
+    def invalidate_context(self, reason):
+        """Reject stale planning results without retrying blindly."""
+
+        self.node.get_logger().warn(
+            f"Planning context invalidated: {reason}"
+        )
+
+        self.invalidate_active()
+
+        self.verified = []
+        self.approved_snapshot = None
+
+        # Conservative policy: a changed goal list or restart
+        # is needed before another planning attempt.
+        self.completed_signature = self.signature
+
+        self.on_verified([])
+
     def is_current(self, token):
         """Return whether a callback belongs to the active request."""
         return (
@@ -75,6 +121,7 @@ class FrontierPlanningClient:
         self.active_token = None
         self.deadline_s = None
         self.busy = False
+        self.active_snapshot = None
 
         handle = self.active_handle
         self.active_handle = None
@@ -137,6 +184,7 @@ class FrontierPlanningClient:
 
         # Cancel or ignore any response from the previous goals.
         self.invalidate_active()
+        self.approved_snapshot = None
 
         self.signature = signature
         self.candidates = candidates
@@ -150,7 +198,25 @@ class FrontierPlanningClient:
         )
 
     def tick(self):
-        """Start planning or handle a request timeout."""
+        """Start planning or handle timeouts and stale context."""
+
+        if self.busy and self.freshness_monitor is not None:
+            valid, reason = self.context_status(
+                self.active_snapshot
+            )
+
+            if not valid:
+                self.invalidate_context(reason)
+                return
+
+        if self.approved_snapshot is not None:
+            valid, reason = self.context_status(
+                self.approved_snapshot
+            )
+
+            if not valid:
+                self.invalidate_context(reason)
+                return
 
         if self.busy:
             if (
@@ -189,6 +255,36 @@ class FrontierPlanningClient:
                 self.waiting_logged = True
             return
 
+        if self.freshness_monitor is not None:
+            ready = (
+                self.context_ready is None
+                or self.context_ready()
+            )
+
+            if not ready:
+                if not self.context_wait_logged:
+                    self.node.get_logger().info(
+                        "Waiting for planning map/TF context."
+                    )
+                    self.context_wait_logged = True
+                return
+
+            try:
+                self.active_snapshot = (
+                    self.freshness_monitor.capture(
+                        time.monotonic()
+                    )
+                )
+            except (RuntimeError, ValueError) as exc:
+                if not self.context_wait_logged:
+                    self.node.get_logger().warn(
+                        f"Planning context not ready: {exc}"
+                    )
+                    self.context_wait_logged = True
+                return
+
+            self.context_wait_logged = False
+
         self.waiting_logged = False
         self.busy = True
 
@@ -213,7 +309,20 @@ class FrontierPlanningClient:
             return
 
         if self.index >= len(self.active_candidates):
+            if self.freshness_monitor is not None:
+                valid, reason = self.context_status(
+                    self.active_snapshot
+                )
+
+                if not valid:
+                    self.invalidate_context(reason)
+                    return
+
             results = list(self.verified)
+
+            self.approved_snapshot = (
+                self.active_snapshot if results else None
+            )
 
             self.busy = False
             self.active_token = None
@@ -320,10 +429,19 @@ class FrontierPlanningClient:
             self.advance(token)
 
     def result_response(self, future, token, requested_pose):
-        """Validate a result only if its original request is active."""
+        """Validate only matching, fresh action results."""
 
         if not self.is_current(token):
             return
+
+        if self.freshness_monitor is not None:
+            valid, reason = self.context_status(
+                self.active_snapshot
+            )
+
+            if not valid:
+                self.invalidate_context(reason)
+                return
 
         try:
             response = future.result()
