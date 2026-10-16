@@ -27,6 +27,7 @@ class FrontierPlanningClient:
         request_timeout_s=10.0,
         freshness_monitor=None,
         context_ready=None,
+        replanning_policy=None,
     ):
         if request_timeout_s <= 0:
             raise ValueError("Request timeout must be positive")
@@ -37,6 +38,8 @@ class FrontierPlanningClient:
 
         self.freshness_monitor = freshness_monitor
         self.context_ready = context_ready
+        self.replanning_policy = replanning_policy
+        self.last_seen_map_revision = None
         self.active_snapshot = None
         self.approved_snapshot = None
         self.context_wait_logged = False
@@ -96,10 +99,22 @@ class FrontierPlanningClient:
             f"Planning context invalidated: {reason}"
         )
 
+        was_busy = self.busy
         self.invalidate_active()
 
         self.verified = []
         self.approved_snapshot = None
+
+        if self.replanning_policy is not None:
+            now = time.monotonic()
+
+            if (
+                reason == "Planning result expired"
+                and not was_busy
+            ):
+                self.replanning_policy.request_recheck(now)
+            else:
+                self.replanning_policy.context_changed(now)
 
         # Conservative policy: a changed goal list or restart
         # is needed before another planning attempt.
@@ -190,6 +205,12 @@ class FrontierPlanningClient:
         self.candidates = candidates
         self.completed_signature = None
 
+        if self.replanning_policy is not None:
+            self.replanning_policy.set_goal(
+                signature if candidates else None,
+                time.monotonic(),
+            )
+
         # Never retain an old approved preview after goals change.
         self.on_verified([])
 
@@ -199,6 +220,52 @@ class FrontierPlanningClient:
 
     def tick(self):
         """Start planning or handle timeouts and stale context."""
+
+        # A stalled action must count as a failure even when
+        # the planning snapshot is also about to expire.
+        if (
+            self.busy
+            and self.deadline_s is not None
+            and time.monotonic() >= self.deadline_s
+        ):
+            self.node.get_logger().warn(
+                "Planner request timed out after "
+                f"{self.request_timeout_s:.1f} s"
+            )
+
+            self.invalidate_active()
+            self.verified = []
+            self.on_verified([])
+            self.completed_signature = self.signature
+
+            if self.replanning_policy is not None:
+                self.replanning_policy.finish_attempt(
+                    False, time.monotonic()
+                )
+
+            return
+
+        # Detect every observed map revision change,
+        # including changes while waiting to retry.
+        if (
+            self.replanning_policy is not None
+            and self.freshness_monitor is not None
+        ):
+            revision = self.freshness_monitor.map_revision
+
+            if self.last_seen_map_revision is None:
+                self.last_seen_map_revision = revision
+
+            elif revision != self.last_seen_map_revision:
+                self.last_seen_map_revision = revision
+
+                if self.busy or self.approved_snapshot is not None:
+                    self.invalidate_context("Map changed")
+                    return
+
+                self.replanning_policy.context_changed(
+                    time.monotonic()
+                )
 
         if self.busy and self.freshness_monitor is not None:
             valid, reason = self.context_status(
@@ -219,32 +286,20 @@ class FrontierPlanningClient:
                 return
 
         if self.busy:
-            if (
-                self.deadline_s is not None
-                and time.monotonic() >= self.deadline_s
-            ):
-                self.node.get_logger().warn(
-                    "Planner request timed out after "
-                    f"{self.request_timeout_s:.1f} s"
-                )
-
-                self.invalidate_active()
-
-                # Fail closed: do not approve partial results.
-                self.verified = []
-                self.on_verified([])
-
-                # Avoid continuously retrying the same stalled goal.
-                # A changed candidate list or client restart
-                # allows another attempt.
-                self.completed_signature = self.signature
-
             return
 
         if not self.candidates:
             return
 
-        if self.signature == self.completed_signature:
+        if self.replanning_policy is not None:
+            decision = self.replanning_policy.decision(
+                time.monotonic()
+            )
+
+            if not decision.allowed:
+                return
+
+        elif self.signature == self.completed_signature:
             return
 
         if not self.client.server_is_ready():
@@ -285,6 +340,11 @@ class FrontierPlanningClient:
 
             self.context_wait_logged = False
 
+        if self.replanning_policy is not None:
+            self.replanning_policy.begin_attempt(
+                time.monotonic()
+            )
+
         self.waiting_logged = False
         self.busy = True
 
@@ -319,6 +379,23 @@ class FrontierPlanningClient:
                     return
 
             results = list(self.verified)
+
+            if self.replanning_policy is not None:
+                self.replanning_policy.finish_attempt(
+                    bool(results),
+                    time.monotonic(),
+                )
+
+                if not results:
+                    decision = self.replanning_policy.decision(
+                        time.monotonic()
+                    )
+
+                    self.node.get_logger().info(
+                        "Replanning policy: "
+                        f"{decision.reason}, "
+                        f"wait={decision.wait_s:.1f} s"
+                    )
 
             self.approved_snapshot = (
                 self.active_snapshot if results else None

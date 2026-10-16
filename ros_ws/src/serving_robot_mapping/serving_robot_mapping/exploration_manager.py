@@ -23,6 +23,9 @@ from serving_robot_mapping.planner_action_client import (
 from serving_robot_mapping.planning_freshness import (
     PlanningFreshnessMonitor,
 )
+from serving_robot_mapping.replanning_policy import (
+    ReplanningPolicy,
+)
 from serving_robot_mapping.frontier_detector import FrontierDetector
 from serving_robot_mapping.exploration_goal_manager import (
     ExplorationGoalManager,
@@ -225,6 +228,14 @@ class ExplorationManager(Node):
 
         self.planner_verified_goal = None
 
+        self.replanning_policy = ReplanningPolicy(
+            settle_s=2.0,
+            min_interval_s=3.0,
+            retry_base_s=2.0,
+            retry_max_s=16.0,
+            max_failures=3,
+        )
+
         self.planner_client = FrontierPlanningClient(
             node=self,
             action_name=str(
@@ -233,6 +244,7 @@ class ExplorationManager(Node):
             on_verified=self.planner_results_callback,
             freshness_monitor=self.freshness_monitor,
             context_ready=lambda: self.freshness_context_ready,
+            replanning_policy=self.replanning_policy,
         )
 
         self.last_frontier_count = None
