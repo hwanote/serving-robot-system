@@ -26,6 +26,9 @@ from serving_robot_mapping.planning_freshness import (
 from serving_robot_mapping.tf_freshness import (
     TfFreshnessChecker,
 )
+from serving_robot_mapping.tf_recovery_gate import (
+    TfRecoveryGate,
+)
 from serving_robot_mapping.replanning_policy import (
     ReplanningPolicy,
 )
@@ -123,6 +126,9 @@ class ExplorationManager(Node):
             "planning.tf_max_future_offset_s", 0.30
         )
         self.declare_parameter(
+            "planning.tf_recovery_stable_s", 1.0
+        )
+        self.declare_parameter(
             "planning.max_translation_m", 0.15
         )
         self.declare_parameter(
@@ -186,6 +192,14 @@ class ExplorationManager(Node):
                     ).value
                 )
             ),
+        )
+
+        self.tf_recovery_gate = TfRecoveryGate(
+            stable_s=float(
+                self.get_parameter(
+                    "planning.tf_recovery_stable_s"
+                ).value
+            )
         )
 
         self.tf_freshness_checker = TfFreshnessChecker(
@@ -506,6 +520,10 @@ class ExplorationManager(Node):
     def mark_tf_invalid(self, reason):
         """Block planning and discard approvals on invalid TF."""
 
+        self.tf_recovery_gate.observe(
+            False, time.monotonic()
+        )
+
         if not self.freshness_tf_missing:
             self.get_logger().warn(
                 f"Planning TF invalid: {reason}"
@@ -579,6 +597,13 @@ class ExplorationManager(Node):
 
         if not result.valid:
             self.mark_tf_invalid(result.reason)
+            return
+
+        # After a TF failure, require a continuous healthy
+        # interval before restoring the planning context.
+        if not self.tf_recovery_gate.observe(
+            True, time.monotonic()
+        ):
             return
 
         position = map_base.transform.translation
