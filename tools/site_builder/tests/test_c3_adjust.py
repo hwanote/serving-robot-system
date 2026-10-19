@@ -2,6 +2,9 @@
 import copy, json, os, sys, tempfile, unittest, filecmp
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fixtures import ensure_demo_fixtures   # noqa: E402
+ensure_demo_fixtures()
 import yaml
 from site_builder import adjust
 from site_builder.params import load_params

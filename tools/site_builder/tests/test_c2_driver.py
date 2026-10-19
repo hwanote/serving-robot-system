@@ -1,6 +1,9 @@
 """C-2: BusDriver + StepMonitor against a fake bus that behaves like the route executor."""
 import os, sys, json, tempfile, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fixtures import ensure_demo_fixtures   # noqa: E402
+ensure_demo_fixtures()
 import yaml
 from site_builder import monitor, probe, tour as tourmod
 from site_builder.drive_ros import BusDriver

@@ -5,6 +5,9 @@ import json, os, shutil, sys, tempfile, threading, http.client
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _fixtures import ensure_demo_fixtures   # noqa: E402
+ensure_demo_fixtures()
 from site_builder.server import App, serve   # noqa: E402
 
 REPO = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
