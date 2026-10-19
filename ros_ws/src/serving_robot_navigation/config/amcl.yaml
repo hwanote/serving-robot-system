@@ -1,0 +1,59 @@
+# AMCL localization on the static store map (demo_store).
+# Frames follow the current robot model: map -> odom -> base_footprint.
+amcl:
+  ros__parameters:
+    use_sim_time: true
+
+    # Frames / topics
+    global_frame_id: "map"
+    odom_frame_id: "odom"
+    base_frame_id: "base_footprint"
+    scan_topic: /robot_01/scan
+    tf_broadcast: true
+    transform_tolerance: 1.0
+
+    # Initial pose = robot_01 spawn pose in spawn_robot.launch.py
+    # (the map origin equals the Gazebo world origin).
+    # Change it together with the spawn pose.
+    set_initial_pose: true
+    always_reset_initial_pose: true
+    initial_pose:
+      x: -3.2
+      y: -2.4
+      z: 0.0
+      yaw: 0.0
+
+    # Motion / sensor models
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    laser_model_type: "likelihood_field"
+    laser_min_range: -1.0
+    laser_max_range: 12.0
+    max_beams: 120
+    laser_likelihood_max_dist: 2.0
+    sigma_hit: 0.1
+    z_hit: 0.8
+    z_rand: 0.2
+    z_max: 0.05
+    z_short: 0.05
+    lambda_short: 0.1
+    do_beamskip: false
+    beam_skip_distance: 0.5
+    beam_skip_error_threshold: 0.9
+    beam_skip_threshold: 0.3
+    alpha1: 0.1
+    alpha2: 0.1
+    alpha3: 0.1
+    alpha4: 0.1
+    alpha5: 0.2
+
+    # Particle filter
+    min_particles: 500
+    max_particles: 2000
+    pf_err: 0.05
+    pf_z: 0.99
+    resample_interval: 1
+    recovery_alpha_fast: 0.0
+    recovery_alpha_slow: 0.0
+    update_min_d: 0.05
+    update_min_a: 0.05
+    save_pose_rate: 0.5
