@@ -1,0 +1,24 @@
+# Named areas (axis-aligned rectangles, map frame, SI units).
+#
+# OWNERSHIP: per the integration guide (Q3-7) zones.yaml is owned by the Fleet
+# part. This file only carries the MINIMUM the robot part needs right now: names
+# for locations in alarm messages ("blocked in aisle_middle"). Zone reservation
+# polygons and staging poses are defined by the Fleet part; adopt theirs when
+# they exist and keep the ids used by `edges[].zone` in waypoints.yaml.
+#
+# Lookup rule: the FIRST zone that contains the point wins (order matters).
+# status: provisional.
+schema_version: 1
+status: provisional
+owner: fleet            # robot part keeps a provisional copy until then
+frame_id: map
+
+zones:
+  - {id: standby_zone,  rect: {x_min: -3.60, x_max: -2.80, y_min: -2.85, y_max: -1.95}}
+  - {id: kitchen_zone,  rect: {x_min: -3.00, x_max: -1.60, y_min: 1.10,  y_max: 2.00}}
+  - {id: aisle_west,    rect: {x_min: -3.90, x_max: -2.50, y_min: -2.90, y_max: 2.00}}
+  - {id: aisle_south,   rect: {x_min: -3.90, x_max: 2.40,  y_min: -2.90, y_max: -1.85}}
+  - {id: aisle_center,  rect: {x_min: -0.72, x_max: 0.67,  y_min: -2.90, y_max: 2.00}}
+  - {id: aisle_middle,  rect: {x_min: -3.90, x_max: 3.90,  y_min: -1.05, y_max: 0.25}}
+  - {id: aisle_north,   rect: {x_min: -3.90, x_max: 3.90,  y_min: 1.05,  y_max: 2.05}}
+  - {id: aisle_east,    rect: {x_min: 2.43,  x_max: 3.90,  y_min: -1.05, y_max: 2.05}}
