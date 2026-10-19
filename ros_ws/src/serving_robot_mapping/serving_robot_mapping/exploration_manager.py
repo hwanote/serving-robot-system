@@ -23,6 +23,9 @@ from serving_robot_mapping.planner_action_client import (
 from serving_robot_mapping.planning_freshness import (
     PlanningFreshnessMonitor,
 )
+from serving_robot_mapping.tf_freshness import (
+    TfFreshnessChecker,
+)
 from serving_robot_mapping.replanning_policy import (
     ReplanningPolicy,
 )
@@ -114,6 +117,12 @@ class ExplorationManager(Node):
             "planning.max_age_s", 10.0
         )
         self.declare_parameter(
+            "planning.tf_max_past_age_s", 0.50
+        )
+        self.declare_parameter(
+            "planning.tf_max_future_offset_s", 0.30
+        )
+        self.declare_parameter(
             "planning.max_translation_m", 0.15
         )
         self.declare_parameter(
@@ -176,6 +185,19 @@ class ExplorationManager(Node):
                         "planning.max_rotation_deg"
                     ).value
                 )
+            ),
+        )
+
+        self.tf_freshness_checker = TfFreshnessChecker(
+            max_past_age_s=float(
+                self.get_parameter(
+                    "planning.tf_max_past_age_s"
+                ).value
+            ),
+            max_future_offset_s=float(
+                self.get_parameter(
+                    "planning.tf_max_future_offset_s"
+                ).value
             ),
         )
 
@@ -481,8 +503,32 @@ class ExplorationManager(Node):
             "PREVIEW ONLY: Navigation is disabled."
         )
 
+    def mark_tf_invalid(self, reason):
+        """Block planning and discard approvals on invalid TF."""
+
+        if not self.freshness_tf_missing:
+            self.get_logger().warn(
+                f"Planning TF invalid: {reason}"
+            )
+
+        self.freshness_tf_missing = True
+        self.freshness_context_ready = False
+
+        # Invalidate an ongoing or previously approved plan.
+        # The client also clears the Exploration Manager preview
+        # through its on_verified callback.
+        client = self.planner_client
+
+        if (
+            client.busy
+            or client.approved_snapshot is not None
+        ):
+            client.invalidate_context(
+                "TF unavailable or stale"
+            )
+
     def freshness_observation_loop(self) -> None:
-        """Observe map-frame robot pose without commanding motion."""
+        """Validate the TF chain before updating robot pose."""
 
         if self.state_machine.state not in (
             MappingState.EXPLORING,
@@ -491,26 +537,52 @@ class ExplorationManager(Node):
             return
 
         try:
-            transform = self.tf_buffer.lookup_transform(
-                "map",
-                "base_footprint",
-                Time(),
+            map_odom = self.tf_buffer.lookup_transform(
+                "map", "odom", Time()
+            )
+
+            odom_base = self.tf_buffer.lookup_transform(
+                "odom", "base_footprint", Time()
+            )
+
+            map_base = self.tf_buffer.lookup_transform(
+                "map", "base_footprint", Time()
             )
 
         except TransformException as exc:
-            if not self.freshness_tf_missing:
-                self.get_logger().warn(
-                    f"Freshness TF unavailable: {exc}"
-                )
-                self.freshness_tf_missing = True
-
-            self.freshness_context_ready = False
+            self.mark_tf_invalid(
+                f"Transform unavailable: {exc}"
+            )
             return
 
-        self.freshness_tf_missing = False
+        # IMPORTANT: use ROS simulation time for TF stamps.
+        # time.monotonic() remains appropriate for action
+        # timeouts, but NOT for TF timestamp comparisons.
+        sim_now_s = (
+            self.get_clock().now().nanoseconds / 1e9
+        )
 
-        position = transform.transform.translation
-        orientation = transform.transform.rotation
+        map_stamp = map_odom.header.stamp
+        odom_stamp = odom_base.header.stamp
+
+        result = self.tf_freshness_checker.validate(
+            sim_now_s=sim_now_s,
+            map_odom_stamp_s=(
+                map_stamp.sec
+                + map_stamp.nanosec * 1e-9
+            ),
+            odom_base_stamp_s=(
+                odom_stamp.sec
+                + odom_stamp.nanosec * 1e-9
+            ),
+        )
+
+        if not result.valid:
+            self.mark_tf_invalid(result.reason)
+            return
+
+        position = map_base.transform.translation
+        orientation = map_base.transform.rotation
 
         yaw = quaternion_to_yaw(
             orientation.x,
@@ -519,19 +591,32 @@ class ExplorationManager(Node):
             orientation.w,
         )
 
-        self.freshness_monitor.update_robot_pose(
-            x=position.x,
-            y=position.y,
-            yaw=yaw,
-        )
+        try:
+            self.freshness_monitor.update_robot_pose(
+                x=position.x,
+                y=position.y,
+                yaw=yaw,
+            )
+        except ValueError as exc:
+            self.mark_tf_invalid(
+                f"Invalid TF robot pose: {exc}"
+            )
+            return
+
+        if self.freshness_tf_missing:
+            self.get_logger().info(
+                "Planning TF recovered: timestamps valid."
+            )
+
+        self.freshness_tf_missing = False
 
         if not self.freshness_context_ready:
             try:
                 snapshot = self.freshness_monitor.capture(
                     now_s=time.monotonic()
                 )
-
             except RuntimeError:
+                # The initial SLAM map is not ready yet.
                 return
 
             self.get_logger().info(
@@ -543,8 +628,9 @@ class ExplorationManager(Node):
             )
 
             self.get_logger().info(
-                "Freshness monitoring only; "
-                "navigation remains disabled."
+                "TF freshness OK: "
+                f"map->odom age={result.map_odom_age_s:.3f} s, "
+                f"odom->base age={result.odom_base_age_s:.3f} s"
             )
 
             self.freshness_context_ready = True
