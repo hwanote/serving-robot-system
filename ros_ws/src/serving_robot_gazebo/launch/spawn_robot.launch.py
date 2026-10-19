@@ -3,6 +3,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import Node
 
@@ -60,10 +62,10 @@ def generate_launch_description():
             '-string', robot_description,
             '-name', 'robot_01',
             '-allow_renaming', 'false',
-            '-x', '-3.2',
-            '-y', '-2.25',
+            '-x', LaunchConfiguration('spawn_x'),
+            '-y', LaunchConfiguration('spawn_y'),
             '-z', '0.02',
-            '-Y', '0.0',
+            '-Y', LaunchConfiguration('spawn_yaw'),
         ],
     )
 
@@ -79,7 +81,13 @@ def generate_launch_description():
         ],
     )
 
+    # Spawn pose in the world/map frame (yaw in radians). The defaults match
+    # config/common/robot_start.yaml; operation_mode.launch.py passes that file's
+    # values so there is a single source of truth.
     return LaunchDescription([
+        DeclareLaunchArgument('spawn_x', default_value='-3.2'),
+        DeclareLaunchArgument('spawn_y', default_value='-2.4'),
+        DeclareLaunchArgument('spawn_yaw', default_value='0.0'),
         robot_state_publisher,
         bridge,
         spawn_robot,

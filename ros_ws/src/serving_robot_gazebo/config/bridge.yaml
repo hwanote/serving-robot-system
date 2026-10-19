@@ -33,3 +33,62 @@
   ros_type_name: "sensor_msgs/msg/LaserScan"
   gz_type_name: "gz.msgs.LaserScan"
   direction: GZ_TO_ROS
+
+- ros_topic_name: "/robot_01/contact"
+  # Gazebo ignores <topic> for contact sensors: it publishes on the sensor's
+  # scoped name (checked on the VM with gz topic -i).
+  gz_topic_name: "/world/cafe/model/robot_01/link/base_footprint/sensor/bumper_contact/contact"
+  ros_type_name: "ros_gz_interfaces/msg/Contacts"
+  gz_type_name: "gz.msgs.Contacts"
+  direction: GZ_TO_ROS
+
+# Front RGB-D camera (rgbd_camera sensor, 320x240, 120 deg, 10 Hz)
+- ros_topic_name: "/robot_01/camera_front/image"
+  gz_topic_name: "/model/robot_01/camera_front/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/robot_01/camera_front/depth"
+  gz_topic_name: "/model/robot_01/camera_front/depth_image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/robot_01/camera_front/camera_info"
+  gz_topic_name: "/model/robot_01/camera_front/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+# camera_rear_left RGB-D camera (120 deg, 5 Hz)
+- ros_topic_name: "/robot_01/camera_rear_left/image"
+  gz_topic_name: "/model/robot_01/camera_rear_left/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+- ros_topic_name: "/robot_01/camera_rear_left/depth"
+  gz_topic_name: "/model/robot_01/camera_rear_left/depth_image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+- ros_topic_name: "/robot_01/camera_rear_left/camera_info"
+  gz_topic_name: "/model/robot_01/camera_rear_left/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+# camera_rear_right RGB-D camera (120 deg, 5 Hz)
+- ros_topic_name: "/robot_01/camera_rear_right/image"
+  gz_topic_name: "/model/robot_01/camera_rear_right/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+- ros_topic_name: "/robot_01/camera_rear_right/depth"
+  gz_topic_name: "/model/robot_01/camera_rear_right/depth_image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+- ros_topic_name: "/robot_01/camera_rear_right/camera_info"
+  gz_topic_name: "/model/robot_01/camera_rear_right/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
