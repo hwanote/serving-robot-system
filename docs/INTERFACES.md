@@ -1,4 +1,4 @@
-# 인터페이스 계약 (자율주행 파트)  v0.11
+# 인터페이스 계약 (자율주행 파트)  v0.12
 
 React 관리/조작 패널, Fleet(다중 로봇), 다른 팀원 노드가 **자율주행 파트와 주고받는 토픽, 서비스, 메시지 필드**를 한곳에 모은 문서입니다.
 코드를 읽지 않아도 "무엇을 읽고, 무엇을 보내면 되는지" 알 수 있게 하는 것이 목적입니다.
@@ -73,7 +73,7 @@ React 관리/조작 패널, Fleet(다중 로봇), 다른 팀원 노드가 **자�
 | `/robot_01/scan_dynamic` | `sensor_msgs/LaserScan` | `dynamic_scan_filter` | `collision_monitor`(정지/감속 구역), `soft_stop_limiter`, `person_state`, `person_speed_limiter` | 센서 QoS | 지도의 벽, 고정 장애물을 뺀 스캔 (움직이는 것만 남김) |
 | `/robot_01/camera_front/image` | `sensor_msgs/Image` | 브리지 | `person_detector` | 10 Hz (320x240) | 전방 RGB (120°) |
 | `/robot_01/camera_front/depth` | `sensor_msgs/Image` | 브리지 | `person_detector` | 10 Hz | 전방 깊이 |
-| `/robot_01/camera_front/camera_info` | `sensor_msgs/CameraInfo` | 브리지 | (현재 구독자 없음) | | |
+| `/robot_01/camera_front/camera_info` | `sensor_msgs/CameraInfo` | 브리지 | `person_detector` | | 초점거리(fx, cx)를 읽어 사람 방향 계산에 씀 |
 | `/robot_01/camera_rear_left/image`, `/robot_01/camera_rear_left/depth`, `/robot_01/camera_rear_left/camera_info` | Image, Image, CameraInfo | 브리지 | `person_detector` | 5 Hz | 좌후방(+120°) 카메라 (120°) |
 | `/robot_01/camera_rear_right/image`, `/robot_01/camera_rear_right/depth`, `/robot_01/camera_rear_right/camera_info` | Image, Image, CameraInfo | 브리지 | `person_detector` | 5 Hz | 우후방(−120°) 카메라 (120°) |
 | `/robot_01/contact` | `ros_gz_interfaces/Contacts` | 브리지 | `soft_stop_limiter` | | 충돌(접촉) 센서 |
@@ -84,10 +84,10 @@ React 관리/조작 패널, Fleet(다중 로봇), 다른 팀원 노드가 **자�
 
 | 토픽 | 타입 | 발행 | 구독 | 주기 / QoS | 내용 |
 |---|---|---|---|---|---|
-| **`/robot_01/person_detection`** | `std_msgs/String` (JSON) | `person_state` | `person_speed_limiter`, `route_executor`(감지기 생존 확인만) | 관측마다 (4 Hz) | 사람 상태 (아래 5.1). 관측이 끊기면 이것도 끊김 = 감지기 응답 없음 |
+| **`/robot_01/person_detection`** | `std_msgs/String` (JSON) | `person_state` | `person_speed_limiter`, `route_executor`(감지기 생존 확인, `silent_cameras`), `robot_health`(`silent_cameras`) | 관측마다 (4 Hz) | 사람 상태 (아래 5.1). 관측이 끊기면 이것도 끊김 = 감지기 응답 없음 |
 | **`/robot_01/person_limit`** | `std_msgs/String` (JSON) | `person_speed_limiter` | `route_executor`, UI | 감지기 메시지마다 + 0.5 s 마다 | **지금 실제로 적용 중인 사람 제한**. 속도 제한과 실행기가 같은 결정을 보게 하는 단일 출처 (아래 5.2) |
-| `/robot_01/obstacle_hold` | `std_msgs/Bool` | `soft_stop_limiter` | `route_executor`, `person_state` | 값이 바뀔 때, latched | 장애물 때문에 멈춰서 길이 비기를 기다리는 중 |
-| `/robot_01/collision_latched` | `std_msgs/Bool` | `soft_stop_limiter` | `route_executor`, UI | 값이 바뀔 때, latched | 충돌 후 멈춤(잠금) 상태. 해제는 서비스 `clear_collision` |
+| `/robot_01/obstacle_hold` | `std_msgs/Bool` | `soft_stop_limiter` | `route_executor`, `person_state`, `robot_health` | 값이 바뀔 때, latched | 장애물 때문에 멈춰서 길이 비기를 기다리는 중 |
+| `/robot_01/collision_latched` | `std_msgs/Bool` | `soft_stop_limiter` | `route_executor`, `robot_health`, UI | 값이 바뀔 때, latched | 충돌 후 멈춤(잠금) 상태. 해제는 서비스 `clear_collision` |
 | **`/robot_01/health`** | `std_msgs/String` (JSON) | `robot_health` | Fleet, UI, `route_executor` | 1 s 마다 + 상태가 바뀌면 바로 | **로봇 요약 상태**: 팀 enum 의 `robot_state`, `safety_state`, `localization_state` + 위치 + 이유 (아래 5.7). 끊기면 Fleet 이 OFFLINE 판정 |
 | `collision_monitor_state` | `nav2_msgs/CollisionMonitorState` | `collision_monitor` | `soft_stop_limiter` | | 어느 구역(HardStop/StopZone/SlowZone)이 발동했나 |
 
@@ -166,6 +166,8 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 | `time` | number | 시뮬레이션 초 |
 
 속도 규칙: NORMAL 통과 / SLOW 선속도 0.10 m/s, 각속도 0.40 rad/s 이하 / STOP 전진 0, 후진과 회전은 SLOW 한도 / SENSOR_STALE 은 SLOW와 같음.
+
+> 참고: STOP 의 "후진 허용"은 이 제한기의 규칙일 뿐입니다. 실제 속도 사슬에는 후진 명령이 나오지 않습니다(`velocity_smoother` 최소 속도 0, `allow_reversing: false`, backup 행동 없음). STOP 에서 실제로 쓰이는 것은 **제자리 회전**입니다.
 
 > **패널이 "감지기 고장" 배지를 켤 때**는 `silent == true`를 쓰세요. 이 토픽 자체가 2초 넘게 안 오면 `person_speed_limiter`가 죽은 것이니 "알 수 없음"으로 표시합니다.
 
@@ -261,8 +263,10 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 | 2 | `BOOTING` | LiDAR, 위치, 실행기 상태를 아직 다 못 받음 |
 | 3 | `BLOCKED` | 주행 중 15 s 넘게 정지 (`BLOCKED` 알람과 같은 시점). 위치 보류 중(`loc_hold`)은 제외 |
 | 4 | `DEGRADED` | 감지기/카메라 침묵, 위치 DEGRADED, 속도 제한 노드 침묵, 오도메트리 끊김 |
-| 5 | `PAUSED` | 적재/수령 대기, 배달 실패 후 대기, 위치 보류 중 (`LOCALIZATION_HOLD`) |
+| 5 | `PAUSED` | 적재/수령 대기, 배달 실패 후 대기, 위치 보류 중 (`LOCALIZATION_HOLD`, 위치가 OK 일 때만. 아래 참고) |
 | 6 | `NAVIGATING` / `IDLE` | 주행 중 / 임무 없음 |
+
+> 위치 보류 중의 `robot_state`: 위치가 LOST 인 동안은 `ERROR`(우선순위 1), 복구 뒤 DEGRADED 면 `DEGRADED`, OK 면 `PAUSED` 입니다. 어느 경우든 `reasons` 에 `LOCALIZATION_HOLD` 가 들어갑니다. 보류 여부는 `robot_state` 가 아니라 `mission.loc_hold` 로 판단하세요.
 
 `robot_health` 노드는 **보고만** 합니다 (로봇을 직접 움직이지 않음). 다만 `route_executor` 가 `localization_state` 를 읽어 위치 LOST 때 임무를 보류합니다 (6장 `LOCALIZATION_*`). 기준값은 `runtime_limits.yaml` 의 `health`, `localization_hold` [제안].
 
@@ -369,6 +373,7 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 ---
 
 변경 이력
+- v0.12 (2026-10-20): 코드와 대조해 설명만 바로잡음(필드, 토픽, 동작 변경 없음). front `camera_info` 구독자, `robot_health` 구독 목록, STOP 후진은 실제로 쓰이지 않음, 위치 보류 중 `robot_state`(ERROR/DEGRADED/PAUSED).
 - v0.11 (2026-10-16): 비상 초기화 명령 `reset`(`node`), 알람 `ROBOT_RESET`, 임무 결과 코드 `RESET`, nav2 이름 `initialpose`. 기존 필드/명령은 그대로.
 - v0.10 (2026-10-16): 위치 LOST 처리 (복구 알람은 LOST 를 벗어나면: OK 또는 DEGRADED). `mission_status.localization`, `loc_hold`, 명령 `resume`/`home`, 알람 `LOCALIZATION_LOST`/`LOCALIZATION_UNINITIALIZED`/`LOCALIZATION_RECOVERED`/`LOCALIZATION_HOLD`/`MISSION_RESUMED`/`GO_HOME`, health `reasons`에 `LOCALIZATION_HOLD`. 실행기가 `health`를 구독. 기존 필드/명령은 그대로.
 - v0.9 (2026-10-15): `/robot_01/health` 추가 (팀 enum: robot_state / safety_state / localization_state, Pose DTO, reasons). nav2 이름에 `amcl_pose`.

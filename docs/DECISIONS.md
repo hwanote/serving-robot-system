@@ -21,7 +21,7 @@
 
 ### A3. SLOW / STOP 속도 규칙
 - **SLOW**: 선속도 ≤ 0.10 m/s **[합의]**, 각속도 ≤ 0.40 rad/s **[제안]**.
-- **STOP**: 전진만 0. **후진과 회전은 SLOW 한도로 허용.** 
+- **STOP**: 전진만 0. **후진과 회전은 SLOW 한도로 허용.** (제한기 규칙이 그렇다는 뜻. 실제 속도 사슬에는 후진 명령이 나오지 않아 쓰이는 것은 회전이다: `velocity_smoother` 최소 0, `allow_reversing: false`, backup 행동 없음. 2026-10-20 코드 대조로 추가)
   - 반려한 대안: STOP 에서 회전도 0. 우회하려고 회전해야 하는데 로봇이 얼어붙어 우회가 불가능했음(실제 시험에서 발생).
 - **SENSOR_STALE / 메시지 없음 / 알 수 없는 상태 문자열**: SLOW 한도 + 경고 로그. 정지가 아니라 "느리게 갈 수 있게": 센서 고장이 곧 영구 정지가 되면 안 되고, 나머지 방어선(LiDAR, Collision Monitor)이 있음.
 
@@ -76,7 +76,7 @@
 - DEGRADED(0.25~1.0 m)는 멈추지 않음(health 보고만).
 - **위치 판단은 health 한 곳**: 실행기는 `/robot_01/health` 의 `localization_state` 만 읽음(AMCL 을 따로 보지 않음). health 가 3초 넘게 없으면 "모름": 그것만으로 멈추지 않음(시작 직후 불필요한 정지를 피함). 보류 중에 health 가 사라지면 보류 유지(`cancel` 로 해제 가능).
 - `resume` 은 지금 위치에서 같은 목적지로 경로를 다시 잡음(위치가 점프했을 수 있음). 이미 쓴 배달 시간은 유지.
-- health: 보류 중 `robot_state = PAUSED`, 이유 `LOCALIZATION_HOLD` (BLOCKED 로 오인하지 않음).
+- health: 보류 중 이유에 `LOCALIZATION_HOLD` 가 들어가고 BLOCKED 로 오인하지 않음. `robot_state` 는 LOST 동안 `ERROR`, 복구 뒤 DEGRADED 면 `DEGRADED`, OK 면 `PAUSED` (2026-10-20 코드 대조로 정정: 이전에는 "보류 중 PAUSED" 로만 적혀 있었음).
 - 로봇 이름은 `robot_01`, `robot_02` … 로 늘어남: 새 코드(`decide.py --robot`, 실행기 `health_topic`)는 `interfaces.yaml` 의 `{robot}` 으로만 이름을 만듦.
 - **복구 조건을 "OK"가 아니라 "LOST 를 벗어남"으로 (VM 시험 L-2 에서 발견, 사용자 승인)**: 멈춘 로봇은 AMCL 이 갱신되지 않아(움직여야 갱신) 한 번 DEGRADED(0.25~1.0 m)가 되면 영원히 OK 가 되지 못함. 실제로 RViz 2D Pose Estimate(약 0.5 m)로 위치를 알려 줘도 같음. 그래서 OK 또는 DEGRADED 가 2초 이어지면 알람을 내고, 알람에 현재 상태(`localization`)와 "아직 거침" 문구를 붙임. 선택은 사용자가 하고, `resume` 으로 달리면 AMCL 이 수렴함. 필요하면 상한(`recover_max_std_m`)을 둘 수 있음(팀 확인 항목).
 - 값 [제안]: `localization_hold.recover_stable_s` 2.0, `health_max_age_s` 3.0.

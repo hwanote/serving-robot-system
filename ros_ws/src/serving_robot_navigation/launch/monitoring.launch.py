@@ -44,7 +44,8 @@ def _modules(context, *args, **kwargs):
         ),
     ]
     if person_limit:
-        # one camera = one person_detector (4th step: more cameras, more nodes)
+        # one person_detector node handles all cameras of person_safety.cameras
+        # (one YOLO model; see decision C5)
         modules.append(Node(
             package='serving_robot_navigation',
             executable='person_detector.py',

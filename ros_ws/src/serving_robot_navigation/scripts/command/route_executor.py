@@ -9,6 +9,8 @@
                   {"cmd": "confirm_load"}   {"cmd": "confirm_handover"}
                   {"cmd": "resume"}   {"cmd": "home"}
                       after LOCALIZATION_RECOVERED: drive on / cancel and drive home
+                  {"cmd": "reset", "node": "kitchen"}
+                      emergency reset: the robot was put on that node by hand
     services  /robot_01/request_detour   std_srvs/Trigger  (take another corridor now)
               /robot_01/cancel_mission   std_srvs/Trigger
               /robot_01/confirm_load     std_srvs/Trigger  (the load is on the robot)
