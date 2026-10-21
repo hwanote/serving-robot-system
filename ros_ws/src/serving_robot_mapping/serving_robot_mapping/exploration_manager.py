@@ -20,6 +20,12 @@ from rclpy.node import Node
 from serving_robot_mapping.planner_action_client import (
     FrontierPlanningClient,
 )
+from serving_robot_mapping.frontier_navigation_client import (
+    FrontierNavigationClient,
+)
+from serving_robot_mapping.mapping_navigation_safety_monitor import (
+    MappingNavigationSafetyMonitor,
+)
 from serving_robot_mapping.planning_freshness import (
     PlanningFreshnessMonitor,
 )
@@ -47,6 +53,14 @@ from serving_robot_mapping.motion_controller import (
 )
 
 
+
+from sensor_msgs.msg import LaserScan as MappingGuardLaserScan
+from rclpy.qos import qos_profile_sensor_data as mapping_guard_scan_qos
+from rclpy.time import Time as MappingGuardTime
+from serving_robot_mapping.mapping_frontier_clearance import (
+    FrontierClearanceGuard,
+)
+
 class ExplorationManager(Node):
     """Manage the autonomous mapping process."""
 
@@ -65,7 +79,7 @@ class ExplorationManager(Node):
 
         self.declare_parameter(
             "topics.cmd_vel",
-            "/robot_01/cmd_vel",
+            "/mapping/test_only_cmd_vel_unconnected",
         )
 
         self.declare_parameter(
@@ -115,6 +129,22 @@ class ExplorationManager(Node):
         )
         self.declare_parameter(
             "planning.enabled", False
+        )
+        self.declare_parameter("navigation.enabled", False)
+        self.declare_parameter(
+            "navigation.action", "/navigate_to_pose"
+        )
+        self.declare_parameter(
+            "navigation.max_goals_per_run", 1
+        )
+        self.declare_parameter(
+            "navigation.timeout_s", 120.0
+        )
+        self.declare_parameter(
+            "navigation.recovery_wait_s", 3.0
+        )
+        self.declare_parameter(
+            "navigation.recovery_stable_s", 3.0
         )
         self.declare_parameter(
             "planning.max_age_s", 10.0
@@ -283,6 +313,136 @@ class ExplorationManager(Node):
             replanning_policy=self.replanning_policy,
         )
 
+        self.navigation_enabled = bool(
+            self.get_parameter("navigation.enabled").value
+        )
+        self.navigation_max_goals = int(
+            self.get_parameter(
+                "navigation.max_goals_per_run"
+            ).value
+        )
+        self.navigation_timeout_s = float(
+            self.get_parameter("navigation.timeout_s").value
+        )
+        self.navigation_recovery_wait_s = float(
+            self.get_parameter(
+                "navigation.recovery_wait_s"
+            ).value
+        )
+
+        if self.navigation_max_goals < 0:
+            raise ValueError(
+                "navigation.max_goals_per_run must be >= 0"
+            )
+
+        if (
+            not math.isfinite(self.navigation_recovery_wait_s)
+            or self.navigation_recovery_wait_s < 0
+        ):
+            raise ValueError("Invalid recovery wait")
+
+        if self.navigation_enabled and not self.planning_enabled:
+            raise ValueError(
+                "Navigation requires planning.enabled:=true"
+            )
+
+        if (
+            self.navigation_enabled
+            and not bool(
+                self.get_parameter("initial_scan.skip").value
+            )
+        ):
+            raise ValueError(
+                "Navigation requires initial_scan.skip:=true"
+            )
+
+        self.declare_parameter(
+            "navigation.goal_clearance_m", 0.52
+        )
+        self.declare_parameter(
+            "navigation.start_clearance_m", 0.50
+        )
+
+        self.frontier_clearance_guard = FrontierClearanceGuard(
+            goal_clearance_m=float(
+                self.get_parameter(
+                    "navigation.goal_clearance_m"
+                ).value
+            ),
+            start_clearance_m=float(
+                self.get_parameter(
+                    "navigation.start_clearance_m"
+                ).value
+            ),
+        )
+
+        self.navigation_start_scan = None
+        self.navigation_start_scan_wall = None
+        self._mapping_guard_required = True
+
+        if self.navigation_enabled:
+            self.mapping_guard_scan_sub = (
+                self.create_subscription(
+                    MappingGuardLaserScan,
+                    f"/{self.robot_id}/scan",
+                    self.mapping_guard_scan_callback,
+                    mapping_guard_scan_qos,
+                )
+            )
+
+        self.navigation_sent = 0
+        self.navigation_recovery_until = 0.0
+        self.navigation_recovery_safe_since = None
+        self.navigation_recovery_stable_s = float(
+            self.get_parameter(
+                "navigation.recovery_stable_s"
+            ).value
+        )
+        if (
+            not math.isfinite(self.navigation_recovery_stable_s)
+            or self.navigation_recovery_stable_s < 1.0
+        ):
+            raise ValueError("Invalid recovery stable time")
+        self.navigation_rearm_pending = False
+        self.visited_frontiers = []
+
+        self.navigation_monitor = None
+        self.navigation_client = None
+
+        if self.navigation_enabled:
+            self.navigation_monitor = (
+                MappingNavigationSafetyMonitor(
+                    self,
+                    self.tf_buffer,
+                    robot_id=self.robot_id,
+                )
+            )
+            self.navigation_client = FrontierNavigationClient(
+                self,
+                action_name=str(
+                    self.get_parameter(
+                        "navigation.action"
+                    ).value
+                ),
+                enabled=True,
+                safety_check=self.navigation_monitor.is_safe,
+                safety_reason=lambda: (
+                    self.navigation_monitor.last_result[1]
+                ),
+                on_finished=self.navigation_finished,
+                timeout_s=self.navigation_timeout_s,
+            )
+
+            self.get_logger().warn(
+                "Mapping Nav2 navigation ENABLED. "
+                f"Goal limit={self.navigation_max_goals} "
+                "(0 means unlimited)."
+            )
+        else:
+            self.get_logger().info(
+                "Mapping Nav2 navigation disabled."
+            )
+
         self.last_frontier_count = None
         self.pending_goal = None
 
@@ -367,13 +527,18 @@ class ExplorationManager(Node):
                     "topics.frontier_goals"
                 ).value
             ),
-            self.planner_client.update_candidates,
+            self.mapping_update_candidates,
             marker_qos,
         )
 
         self.planning_timer = self.create_timer(
             1.0,
             self.planning_loop,
+        )
+
+        self.navigation_timer = self.create_timer(
+            0.2,
+            self.navigation_loop,
         )
 
         self.freshness_timer = self.create_timer(
@@ -412,9 +577,133 @@ class ExplorationManager(Node):
             angular_velocity=msg.twist.twist.angular.z,
         )
 
-    def planner_results_callback(self, verified_goals):
-        """Store direct action results for preview only."""
+    def mapping_update_candidates(self, marker):
+        """Expand Frontier viewpoints BEFORE Nav2 path verification."""
+        if (
+            not self.navigation_enabled
+            or marker.action != marker.ADD
+            or marker.type != marker.SPHERE_LIST
+            or marker.header.frame_id != "map"
+        ):
+            self.planner_client.update_candidates(marker)
+            return
 
+        groups = []
+
+        for point in marker.points[:10]:
+            groups.append(
+                self.frontier_clearance_guard.observation_candidates(
+                    point.x,
+                    point.y,
+                    max_results=2,
+                )
+            )
+
+        # Round-robin selection prevents one Frontier cluster
+        # from monopolizing Nav2's 10-candidate planning budget.
+        selected = []
+        seen = set()
+
+        for alternative_index in range(2):
+            for group in groups:
+                if alternative_index >= len(group):
+                    continue
+
+                x, y = group[alternative_index]
+                key = (round(x, 2), round(y, 2))
+
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                selected.append((x, y))
+
+                if len(selected) >= 10:
+                    break
+
+            if len(selected) >= 10:
+                break
+
+        forwarded = type(marker)()
+        forwarded.header = marker.header
+        forwarded.type = marker.type
+        forwarded.action = (
+            marker.ADD if selected else marker.DELETE
+        )
+
+        # Keep RViz's original Frontier markers untouched.
+        if marker.points:
+            point_type = type(marker.points[0])
+
+            for x, y in selected:
+                point = point_type()
+                point.x = float(x)
+                point.y = float(y)
+                point.z = 0.0
+                forwarded.points.append(point)
+
+        self.planner_client.update_candidates(forwarded)
+
+        summary = (len(marker.points), len(selected))
+        if summary != getattr(
+            self, "_last_observation_summary", None
+        ):
+            self._last_observation_summary = summary
+            self.get_logger().info(
+                "Mapping observation candidates: "
+                f"{summary[0]} Frontier points -> "
+                f"{summary[1]} clearance-qualified viewpoints"
+            )
+
+    def mapping_guard_scan_callback(self, msg):
+        self.navigation_start_scan = msg
+        self.navigation_start_scan_wall = time.monotonic()
+
+    def mapping_start_clearance_check(self):
+        msg = self.navigation_start_scan
+        received = self.navigation_start_scan_wall
+
+        if msg is None or received is None:
+            return False, "START_SCAN_MISSING"
+
+        if not msg.header.frame_id:
+            return False, "START_SCAN_FRAME_MISSING"
+
+        # This conservative radial check assumes LiDAR and base
+        # centers coincide in XY, as measured on robot_01.
+        # Reject changed sensor mounting rather than guessing.
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                "base_footprint",
+                msg.header.frame_id,
+                MappingGuardTime(),
+            )
+        except Exception:
+            return False, "START_LIDAR_TF_UNAVAILABLE"
+
+        t = transform.transform.translation
+        q = transform.transform.rotation
+
+        yaw = math.atan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y*q.y + q.z*q.z),
+        )
+
+        if (
+            math.hypot(t.x, t.y) > 0.02
+            or abs(yaw) > 0.05
+        ):
+            return False, "START_LIDAR_FRAME_OFFSET"
+
+        return self.frontier_clearance_guard.start_clear(
+            ranges=msg.ranges,
+            range_min=msg.range_min,
+            range_max=msg.range_max,
+            wall_age=time.monotonic() - received,
+        )
+
+    def planner_results_callback(self, verified_goals):
+        """Dispatch an action-verified frontier only when safe."""
         self.planner_verified_goal = None
 
         if self.state_machine.state != MappingState.EXPLORING:
@@ -423,28 +712,108 @@ class ExplorationManager(Node):
         if not self.last_frontier_count:
             return
 
-        selected = self.goal_manager.select_goal(
-            verified_goals
-        )
+        # Do not repeatedly navigate to a reached frontier.
+        eligible = [
+            goal for goal in verified_goals
+            if all(
+                math.hypot(goal.x - x, goal.y - y) > 0.25
+                for x, y in self.visited_frontiers
+            )
+        ]
 
+        if (
+            self.navigation_enabled
+            and getattr(self, "_mapping_guard_required", False)
+        ):
+            clearance_ok = []
+
+            for goal in eligible:
+                allowed, why = (
+                    self.frontier_clearance_guard.goal_clear(
+                        goal.x, goal.y
+                    )
+                )
+
+                if allowed:
+                    clearance_ok.append(goal)
+                else:
+                    self.get_logger().warn(
+                        "Frontier rejected by Mapping clearance: "
+                        f"({goal.x:.2f}, {goal.y:.2f}) {why}"
+                    )
+
+            eligible = clearance_ok
+
+            if not eligible:
+                self.get_logger().warn(
+                    "No clearance-qualified Frontier; "
+                    "no Nav2 goal dispatched."
+                )
+                return
+
+        selected = self.goal_manager.select_goal(eligible)
         if selected is None:
             return
 
         self.planner_verified_goal = selected
 
-        self.get_logger().info(
-            "ACTION-VERIFIED PREVIEW: "
-            f"({selected.x:.2f}, {selected.y:.2f}), "
-            f"path={selected.path_length_m:.2f} m"
-        )
+        if not self.navigation_enabled:
+            self.get_logger().info(
+                "ACTION-VERIFIED PREVIEW: "
+                f"({selected.x:.2f}, {selected.y:.2f}), "
+                f"path={selected.path_length_m:.2f} m; "
+                "navigation disabled."
+            )
+            return
+
+        if (
+            self.navigation_max_goals > 0
+            and self.navigation_sent >= self.navigation_max_goals
+        ):
+            self.get_logger().info(
+                "Mapping navigation goal limit reached."
+            )
+            return
+
+        if self.navigation_client.busy:
+            return
+
+        if not self.navigation_monitor.is_safe():
+            self.get_logger().warn(
+                "Frontier navigation blocked by live safety."
+            )
+            self.request_navigation_replan()
+            return
+
+        if getattr(self, "_mapping_guard_required", False):
+            allowed, why = self.mapping_start_clearance_check()
+
+            if not allowed:
+                self.get_logger().warn(
+                    "Mapping start clearance BLOCKED: "
+                    f"{why}; no goal dispatched."
+                )
+                return
+
+        if not self.navigation_client.start(selected):
+            self.get_logger().warn(
+                "Nav2 goal not dispatched; will replan."
+            )
+            self.request_navigation_replan()
+            return
+
+        self.goal_manager.begin_navigation(selected)
+        self.navigation_sent += 1
 
         self.get_logger().info(
-            "Navigation remains disabled."
+            "MAPPING NAV2 GOAL SENT: "
+            f"({selected.x:.2f}, {selected.y:.2f}), "
+            f"path={selected.path_length_m:.2f} m, "
+            f"request={self.navigation_sent}"
         )
 
     def planning_loop(self):
-        """Run planning only when explicitly enabled."""
-
+        """Plan only while exploring and live conditions allow."""
         if not self.planning_enabled:
             return
 
@@ -454,7 +823,178 @@ class ExplorationManager(Node):
         if not self.last_frontier_count:
             return
 
+        if (
+            self.navigation_enabled
+            and self.navigation_max_goals > 0
+            and self.navigation_sent >= self.navigation_max_goals
+        ):
+            return
+
+        if self.navigation_rearm_pending:
+            if self.planner_client.busy:
+                return
+
+            self.planner_client.invalidate_context(
+                "Mapping navigation transition"
+            )
+            self.planner_client.completed_signature = None
+            self.replanning_policy.request_recheck(
+                time.monotonic()
+            )
+            self.navigation_rearm_pending = False
+
+        if (
+            self.navigation_enabled
+            and not self.navigation_monitor.is_safe()
+        ):
+            return
+
         self.planner_client.tick()
+
+    def request_navigation_replan(self):
+        """Refresh TF/pose before another path request."""
+        self.navigation_rearm_pending = True
+        self.freshness_context_ready = False
+        self.tf_recovery_gate.observe(
+            False, time.monotonic()
+        )
+        self.planner_verified_goal = None
+
+    def navigation_finished(self, goal, outcome, reason):
+        """Handle one terminal Nav2 action result."""
+        self.get_logger().info(
+            f"Mapping navigation result: {outcome}: {reason}"
+        )
+
+        if self.state_machine.state != MappingState.NAVIGATING:
+            return
+
+        if outcome == "SUCCEEDED":
+            if goal is not None:
+                self.visited_frontiers.append(
+                    (goal.x, goal.y)
+                )
+                self.visited_frontiers = (
+                    self.visited_frontiers[-200:]
+                )
+
+            self.goal_manager.navigation_succeeded()
+            self.request_navigation_replan()
+
+            if (
+                self.navigation_max_goals > 0
+                and self.navigation_sent >= self.navigation_max_goals
+            ):
+                self.get_logger().warn(
+                    "Single-run goal limit reached. "
+                    "No additional goals will be sent."
+                )
+            return
+
+        self.goal_manager.navigation_failed()
+
+        # Only a confirmed terminal CANCELED result and
+        # accepted cancellation can authorize recovery.
+        # Physical stopping still relies on Nav2's safety
+        # chain, not the cancellation acknowledgement alone.
+        transient_reasons = {
+            "HEALTH_STALE",
+            "HEALTH_SIM_STALE",
+            "PERSON_LIMIT_STALE",
+            "TF_NOT_STABLE",
+            "MAP_ODOM_TF_STALE",
+            "ODOM_BASE_TF_STALE",
+            "SLAM_NOT_ACTIVE",
+            "SCAN_STALE",
+            "ODOM_STALE",
+            "MAP_STALE",
+        }
+
+        prefix = "Safety check invalid: "
+        safety_code = None
+
+        if reason.startswith(prefix):
+            safety_code = (
+                reason[len(prefix):].split(";", 1)[0].strip()
+            )
+
+        recoverable_cancel = (
+            outcome == "CANCELED"
+            and safety_code in transient_reasons
+            and "cancel response=ACCEPTED" in reason
+            and "terminal status=5" in reason
+        )
+
+        # Only an ordinary Nav2 ABORTED result may retry.
+        # A failed cancellation or timeout must stop.
+        route_failure = (
+            outcome == "FAILED"
+            and reason == "Nav2 result status=6"
+        )
+
+        if recoverable_cancel or route_failure:
+            self.navigation_recovery_until = (
+                time.monotonic()
+                + self.navigation_recovery_wait_s
+            )
+            self.navigation_recovery_safe_since = None
+            self.request_navigation_replan()
+            self.get_logger().warn(
+                "Mapping recovery required: "
+                f"{safety_code or outcome}. "
+                "Waiting for continuous healthy evidence "
+                "before replanning."
+            )
+            return
+
+        # Cancel, rejection, timeout, and ambiguous outcomes
+        # require an operator to restart the Explorer.
+        self.state_machine.transition_to(MappingState.ERROR)
+        self.get_logger().error(
+            "Mapping navigation halted after "
+            f"{outcome}. Manual restart required."
+        )
+
+    def navigation_loop(self):
+        """Continuously monitor active movement and recovery."""
+        if not self.navigation_enabled:
+            return
+
+        state = self.state_machine.state
+
+        if state == MappingState.NAVIGATING:
+            self.navigation_client.tick()
+            return
+
+        if state == MappingState.RECOVERY:
+            now = time.monotonic()
+
+            if not self.navigation_monitor.is_safe():
+                self.navigation_recovery_safe_since = None
+                return
+
+            if self.navigation_recovery_safe_since is None:
+                self.navigation_recovery_safe_since = now
+
+            stable_for = (
+                now - self.navigation_recovery_safe_since
+            )
+
+            if (
+                now >= self.navigation_recovery_until
+                and stable_for
+                >= self.navigation_recovery_stable_s
+            ):
+                self.goal_manager.recovery_finished()
+                self.get_logger().info(
+                    "Safety recovered continuously; "
+                    "returning to verified frontier planning."
+                )
+            return
+
+        if state == MappingState.EXPLORING:
+            # Keep the safety evidence and lifecycle probe warm.
+            self.navigation_monitor.evaluate()
 
     def validated_path_callback(self, msg: Path) -> None:
         """Preview a planner-validated goal without navigating."""
@@ -694,6 +1234,17 @@ class ExplorationManager(Node):
             )
             return
 
+        if self.navigation_enabled:
+            self.frontier_clearance_guard.update_map(
+                data=msg.data,
+                width=int(msg.info.width),
+                height=int(msg.info.height),
+                resolution=float(msg.info.resolution),
+                origin_x=origin.position.x,
+                origin_y=origin.position.y,
+                origin_yaw=origin_yaw,
+            )
+
         if changed:
             revision = self.freshness_monitor.map_revision
 
@@ -868,11 +1419,22 @@ class ExplorationManager(Node):
         )
 
     def stop_robot(self) -> None:
-        """Command zero velocity."""
-        self.cmd_vel_pub.publish(Twist())
+        """Best-effort stop while ROS context is valid."""
+        if not self.context.ok():
+            return
+
+        try:
+            self.cmd_vel_pub.publish(Twist())
+        except Exception:
+            # Shutdown may invalidate the context between
+            # the validity check and the publish call.
+            pass
 
     def destroy_node(self) -> bool:
-        """Stop the robot before node shutdown."""
+        """Request Nav2 cancellation before node shutdown."""
+        client = getattr(self, "navigation_client", None)
+        if client is not None and client.busy:
+            client.cancel("Mapping Explorer shutting down")
         try:
             for _ in range(10):
                 self.stop_robot()
@@ -892,13 +1454,36 @@ def main(args=None) -> None:
         rclpy.spin(node)
 
     except KeyboardInterrupt:
-        node.get_logger().info(
-            "Exploration Manager interrupted by user"
-        )
+        # ROS context may already be invalid after SIGINT.
+        # Do not publish ROS logs during shutdown.
+        pass
 
     finally:
-        for _ in range(10):
-            node.stop_robot()
+        client = getattr(node, "navigation_client", None)
+
+        if (
+            client is not None
+            and client.busy
+            and rclpy.ok()
+        ):
+            client.cancel("Mapping Explorer shutting down")
+            deadline = time.monotonic() + 3.0
+
+            while (
+                rclpy.ok()
+                and client.busy
+                and time.monotonic() < deadline
+            ):
+                try:
+                    rclpy.spin_once(node, timeout_sec=0.1)
+                except Exception:
+                    break
+
+            if client.busy:
+                node.get_logger().error(
+                    "Nav2 cancellation NOT confirmed. "
+                    "Check robot motion and safety chain."
+                )
 
         node.destroy_node()
 

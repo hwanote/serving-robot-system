@@ -11,7 +11,7 @@ exploration_manager:
     topics:
       map: /map
       odom: /robot_01/odom
-      cmd_vel: /robot_01/cmd_vel
+      cmd_vel: /mapping/test_only_cmd_vel_unconnected
       scan: /robot_01/scan
 
     lidar:
