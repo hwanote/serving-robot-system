@@ -5,6 +5,35 @@
 
 ---
 
+## WSL2에서 실행하기 (Windows)
+
+VM 대신 Windows의 WSL2(Ubuntu 24.04)에서도 같은 코드로 실행돼요. 아래는 **한 대의 PC에서 확인한 순서**예요
+(2026-10-21, WSL2 + Ubuntu 24.04.4 + ROS 2 Jazzy). 다른 PC에서는 다를 수 있어요.
+
+1. 확인 (PowerShell): `wsl -l -v` 에서 Ubuntu가 **VERSION 2** 이고, Ubuntu 안에서 `cat /etc/os-release` 가 24.04 인지 봐요.
+2. 메모리 (권장): WSL은 기본으로 PC 메모리의 절반만 써요. Gazebo + Nav2 + YOLO를 같이 켜면 빠듯할 수 있어서,
+   16 GB PC 기준으로 `%UserProfile%\.wslconfig` 파일을 아래처럼 만든 뒤 PowerShell에서 `wsl --shutdown` 하고 다시 열어요 (`free -h` 로 확인).
+
+   ```ini
+   [wsl2]
+   memory=10GB
+   swap=8GB
+   ```
+
+3. 설치: [README.md](../README.md)의 "설치" 절을 그대로 따라요. ROS가 이미 있어도 `ros-jazzy-ros-gz`, `python3-rosdep` 이 빠져 있을 수 있어요
+   (`sudo apt install -y ros-jazzy-ros-gz python3-rosdep`, 그다음 `sudo rosdep init`, `rosdep update`).
+4. 저장소는 **WSL 홈(`~/`)에 clone** 하고 거기서 빌드와 실행을 해요. Windows 폴더(`/mnt/c/...`) 안에서는 느리고
+   줄바꿈, 실행 권한 문제가 생겨요.
+5. 창: Gazebo와 RViz 창은 WSLg 로 Windows 화면에 떠요 (`echo $DISPLAY $WAYLAND_DISPLAY` 에 값이 있어야 해요).
+   창이 안 뜨거나 Gazebo가 바로 죽으면 `export LIBGL_ALWAYS_SOFTWARE=1` 을 해 보세요.
+6. 실행 권한: ROS 노드 스크립트 12개는 커밋 `cd47e39` 부터 실행 권한(100755)이 있어요. 그보다 이전 커밋을 받았다면
+   `launch` 가 `executable ... not found` 로 멈춰요 → 최신 브랜치를 받거나
+   `chmod +x ros_ws/src/serving_robot_bringup/scripts/*.py ros_ws/src/serving_robot_navigation/scripts/*/*.py`.
+7. 사람 감지(YOLO)는 아래 "사람 감지" 절의 설치를 먼저 해야 해요. 처음 한 번 확인할 때는
+   `operation_mode.launch.py person_limit:=false` (시뮬레이션 전용)로 켜면 YOLO 없이 주행만 볼 수 있어요.
+
+---
+
 ## 0. 시작 전 점검 (처음 한 번, 그리고 이전 실행을 비정상 종료했을 때)
 
 ```bash
@@ -231,11 +260,29 @@ cmd_vel_smoothed → person_speed_limiter → cmd_vel_semantic → collision_mon
 
 ### 사람 감지 (카메라 + YOLO)
 
-YOLO는 `~/yolo_venv`(별도 가상환경)에 설치돼 있어야 해요. 설치 확인:
+YOLO는 `~/yolo_venv`(별도 가상환경)에 설치돼 있어야 해요. 감지 노드는 이 안의 패키지를 시스템 파이썬 **뒤에** 붙여서 쓰므로,
+venv의 numpy를 시스템 numpy와 **같은 버전**으로 맞춰요 (`python3 -c "import numpy; print(numpy.__version__)"`; Ubuntu 24.04 + Jazzy는 1.26.4).
+감지기는 CPU로 돌아서 CPU용 torch를 써요.
+
+처음 한 번 설치 (내려받는 용량이 1 GB 안팎이라 몇 분 걸려요):
+
+```bash
+sudo apt install -y python3-venv
+python3 -m venv ~/yolo_venv
+~/yolo_venv/bin/pip install --upgrade pip
+~/yolo_venv/bin/pip install "numpy==1.26.4"            # 시스템 numpy 버전에 맞춰요
+~/yolo_venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+~/yolo_venv/bin/pip install ultralytics "numpy==1.26.4"
+mkdir -p ~/yolo_models
+```
+
+설치 확인 (모델 `yolov8n.pt` 가 없으면 이때 현재 폴더로 자동으로 내려와요):
 
 ```bash
 cd ~/yolo_models && ~/yolo_venv/bin/python ~/serving-robot-system/scripts/dev/yolo_check.py   # persons: 3~4 가 나오면 정상
 ```
+
+시험용 사람 모델(`spawn_person.py`)은 처음 한 번 받아 두세요: `gz fuel download -u "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Standing person"`
 
 카메라는 3대예요(앞 `camera_front`, 좌후방 `camera_rear_left`, 우후방 `camera_rear_right`, 각 120°, 1.0 m 높이).
 사람 감지는 두 노드예요: `person_detector`(카메라 3대를 YOLO 모델 하나로 처리: 앞은 매 주기, 뒤 두 대는 번갈아 → `/robot_01/person_observations`, 본 사람과 실제 거리와 방향)와
@@ -246,7 +293,7 @@ cd ~/yolo_models && ~/yolo_venv/bin/python ~/serving-robot-system/scripts/dev/yo
 ```bash
 ros2 run serving_robot_navigation person_detector.py --ros-args -p use_sim_time:=true -p debug_dir:=~/person_debug
 ros2 run serving_robot_navigation person_state.py --ros-args -p use_sim_time:=true
-ros2 topic echo /robot_01/person_detection --field state     # NORMAL / SLOW / STOP / SENSOR_STALE
+ros2 topic echo /robot_01/person_detection --field data      # JSON 한 줄 (state: NORMAL / SLOW / STOP / SENSOR_STALE)
 python3 ~/serving-robot-system/scripts/dev/spawn_person.py 2.0   # 로봇 앞 2 m에 사람 세우기 (--remove 로 치우기)
 ```
 

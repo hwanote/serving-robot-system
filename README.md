@@ -22,6 +22,7 @@
 - Ubuntu 24.04
 - ROS 2 Jazzy
 - Gazebo Harmonic (`ros-jazzy-ros-gz`로 함께 설치돼요)
+- Windows에서는 **WSL2 + Ubuntu 24.04**로 같은 방식으로 실행할 수 있어요 (한 대의 PC에서 확인한 순서: [docs/RUN_GUIDE.md](docs/RUN_GUIDE.md)의 "WSL2에서 실행하기")
 - GPU가 없는 가상머신(VMware 등)이면 Gazebo/RViz를 실행하는 터미널마다 `export LIBGL_ALWAYS_SOFTWARE=1`이 필요해요.
 
 ## 설치
