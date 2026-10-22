@@ -1,4 +1,4 @@
-# 인터페이스 계약 (자율주행 파트)  v0.13
+# 인터페이스 계약 (자율주행 파트)  v0.14
 
 React 관리/조작 패널, Fleet(다중 로봇), 다른 팀원 노드가 **자율주행 파트와 주고받는 토픽, 서비스, 메시지 필드**를 한곳에 모은 문서입니다.
 코드를 읽지 않아도 "무엇을 읽고, 무엇을 보내면 되는지" 알 수 있게 하는 것이 목적입니다.
@@ -219,7 +219,7 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 | 명령 | JSON |
 |---|---|
 | 이동 | `{"cmd":"go","id":"m1","names":["kitchen","table_01"]}` (`id`는 생략 가능) |
-| 서빙 | `{"cmd":"serve","id":"m2","table":"table_01"}` (주방 적재 → 테이블 수령 → 홈) |
+| 서빙 | `{"cmd":"serve","id":"m2","table":"table_01"}` (주방 적재 → 테이블 수령 → 홈). `"home":false` 를 더하면 수령 확인에서 임무가 `SUCCEEDED` 로 끝나고 로봇은 그 자리에 IDLE 로 남음 (홈 복귀는 따로 `go` 로). 생략하면 지금처럼 홈까지 |
 | 적재 확인 | `{"cmd":"confirm_load"}` |
 | 수령 확인 | `{"cmd":"confirm_handover"}` |
 | 취소 | `{"cmd":"cancel","id":"m2"}`: `id`가 실행 중인 임무와 같을 때만 취소 (다르면 `BAD_COMMAND`). `id`를 빼면 실행 중인 임무를 취소 |
@@ -376,6 +376,7 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 ---
 
 변경 이력
+- v0.14 (2026-10-22): `serve` 명령에 선택 옵션 `home`(기본 true). `false` 면 수령 확인에서 임무 종료. 기존 동작 그대로.
 - v0.13 (2026-10-21): `mission_status` 에 `node`, `next_edge`, `route` 추가 (경로 정보 노출, 동작 변경 없음). 필드 이름은 자율주행 파트 제안이며 팀 합의 필요. 기존 필드/명령은 그대로.
 - v0.12 (2026-10-20): 코드와 대조해 설명만 바로잡음(필드, 토픽, 동작 변경 없음). front `camera_info` 구독자, `robot_health` 구독 목록, STOP 후진은 실제로 쓰이지 않음, 위치 보류 중 `robot_state`(ERROR/DEGRADED/PAUSED).
 - v0.11 (2026-10-16): 비상 초기화 명령 `reset`(`node`), 알람 `ROBOT_RESET`, 임무 결과 코드 `RESET`, nav2 이름 `initialpose`. 기존 필드/명령은 그대로.

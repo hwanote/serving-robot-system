@@ -973,6 +973,33 @@ def test_status_tells_the_localization_state():
     assert r.core.status()['localization'] == 'DEGRADED'
 
 
+def test_serve_without_home_ends_at_the_table():
+    r = Run(real(), W_S)
+    r.log += r.core.start_serve(r.t, 's1', 'table_01', r.xy, home=False)
+    for a in r.log:
+        if a.kind == SEND:
+            r.gen = a.gen
+    drive(r)
+    assert r.core.state == WAIT_LOAD
+    ok, _, acts = r.core.confirm_load(r.t, r.xy)
+    r._rec(acts)
+    drive(r)
+    assert r.core.state == WAIT_HANDOVER and r.core.dest.name == 'table_01'
+    ok, _, acts = r.core.confirm_handover(r.t, r.xy)
+    assert ok and [a.kind for a in acts] == [DONE]
+    assert acts[0].result == 'SUCCEEDED' and r.core.state == IDLE
+    assert r.core.status()['route'] == [] and r.core.status()['mission_id'] == ''
+
+
+def test_serve_with_home_is_unchanged_by_the_option():
+    r = serving()
+    drive(r)
+    r._rec(r.core.confirm_load(r.t, r.xy)[2])
+    drive(r)
+    acts = r.core.confirm_handover(r.t, r.xy)[2]
+    assert any(a.kind == SEND for a in acts) and r.core.dest.name == 'standby_01'
+
+
 # ----- route info in the status (node / next_edge / route) -------------------------
 def test_status_route_info_while_driving_a_serve_order():
     r = serving()

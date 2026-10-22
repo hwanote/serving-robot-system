@@ -5,6 +5,7 @@
                   {"cmd": "go", "names": ["table_01", "kitchen"], "id": "x"}
                   {"cmd": "serve", "table": "table_01", "id": "x"}
                       kitchen -> wait for load -> table -> wait for handover -> home
+                      ("home": false: the mission ends at the table, the robot stays there)
                   {"cmd": "cancel"}   {"cmd": "detour"}
                   {"cmd": "confirm_load"}   {"cmd": "confirm_handover"}
                   {"cmd": "resume"}   {"cmd": "home"}
@@ -320,8 +321,10 @@ class RouteExecutor(Node):
 
     def _serve(self, cmd):
         table = str(cmd.get('table', ''))
+        home = cmd.get('home', True) is not False
         self._launch(cmd, 'serve %s' % table,
-                     lambda now, mid, xy: self.core.start_serve(now, mid, table, xy))
+                     lambda now, mid, xy: self.core.start_serve(
+                         now, mid, table, xy, home=home))
 
     def _launch(self, cmd, label, starter):
         self.counter += 1

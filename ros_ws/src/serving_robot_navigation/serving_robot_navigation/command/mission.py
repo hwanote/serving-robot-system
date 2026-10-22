@@ -286,8 +286,10 @@ class MissionCore:
                        text='new order refused: the robot %s (localization %s)'
                             % (why, self.loc_state), data=data)]
 
-    def start_serve(self, now, mission_id, table, xy):
-        """Serve one table: kitchen (load) -> table (handover) -> home."""
+    def start_serve(self, now, mission_id, table, xy, home=True):
+        """Serve one table: kitchen (load) -> table (handover) -> home.
+        `home=False`: the mission ends at the table once the order is taken
+        (the robot stays there, IDLE, for the next order)."""
         if self.state != IDLE:
             return self._busy(mission_id)
         if self.loc_refuses_orders():
@@ -296,7 +298,8 @@ class MissionCore:
             if table in (self.p.kitchen_name, self.p.home_name):
                 raise SiteConfigError('%r is not a table' % table)
             poses = [self.site.resolve(n) for n in
-                     (self.p.kitchen_name, table, self.p.home_name)]
+                     (self.p.kitchen_name, table)
+                     + ((self.p.home_name,) if home else ())]
         except SiteConfigError as e:
             return [Action(DONE, result='FAILED', code='BAD_DESTINATION',
                            text=str(e))]
@@ -321,6 +324,8 @@ class MissionCore:
     def confirm_handover(self, now, xy):
         """The customer (or staff) took the load. -> (ok, message, actions)"""
         if self.state == WAIT_HANDOVER:
+            if not self.queue:               # served without a way home
+                return True, 'handover confirmed', self._finish('SUCCEEDED')
             self.state = DRIVING
             self.last_step = now
             return True, 'handover confirmed', self._begin_destination(
