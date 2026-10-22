@@ -187,7 +187,43 @@ class MissionCore:
             'table': self.table,
             'wait_s': round(self.last_step - self.wait_since, 1)
             if self.state in (WAIT_LOAD, WAIT_HANDOVER) and self.last_step is not None else 0.0,
+            **self._route_info(),
         }
+
+    def _route_info(self):
+        """Where the robot is on the route graph (additive status fields).
+
+        node: graph node the robot is at / last left ('' = unknown or off the
+              graph). next_edge: corridor being driven ('' = none).
+        route: nodes still ahead (next node first) up to the end of the whole
+              order, queued destinations included. Empty when idle, waiting
+              or driving a direct goal (no rails).
+        """
+        xy = getattr(self, '_last_xy', None)
+        node, next_edge, route = '', '', []
+        if self.state == DRIVING and self.legs:
+            leg = self.legs[self.leg_i]
+            if leg.edges and xy is not None:
+                i = self._edge_index(leg, xy)
+                node, next_edge = leg.path_nodes[i], leg.edges[i]
+                route = list(leg.path_nodes[i + 1:])
+                for later in self.legs[self.leg_i + 1:]:
+                    route += list(later.path_nodes[1:]) if later.path_nodes \
+                        else [later.node]
+                last = route[-1] if route else leg.node
+                for pose in self.queue:
+                    sp = self.site.shortest_path(last, pose.node, self.blocked)
+                    if sp is None:
+                        break
+                    route += sp[0][1:]
+                    last = pose.node
+        elif self.state in (WAIT_LOAD, WAIT_HANDOVER) and self.dest:
+            node = self.dest.node
+        elif xy is not None:
+            near, dist = self.site.nearest_node(*xy)
+            if dist <= self.p.max_node_dist_m:
+                node = near
+        return {'node': node, 'next_edge': next_edge, 'route': route}
 
     def _avoided(self, now):
         for e in [e for e, until in self.blocked.items() if until <= now]:
@@ -693,6 +729,7 @@ class MissionCore:
     def step(self, now, xy, hold, latched, yaw=None):
         """Call regularly. `hold`: a stop signal is on (obstacle / person).
         `yaw` (rad, optional): turning in place counts as moving."""
+        self._last_xy = xy
         if self.state in (WAIT_LOAD, WAIT_HANDOVER):
             self.anchor = None
             return self._wait_step(now, xy)

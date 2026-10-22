@@ -1,4 +1,4 @@
-# 인터페이스 계약 (자율주행 파트)  v0.12
+# 인터페이스 계약 (자율주행 파트)  v0.13
 
 React 관리/조작 패널, Fleet(다중 로봇), 다른 팀원 노드가 **자율주행 파트와 주고받는 토픽, 서비스, 메시지 필드**를 한곳에 모은 문서입니다.
 코드를 읽지 않아도 "무엇을 읽고, 무엇을 보내면 되는지" 알 수 있게 하는 것이 목적입니다.
@@ -189,6 +189,9 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 | `table` | string | 서빙 대상 테이블 |
 | `delivery_s` | number | 배달 경과 시간 (제한 180 s) |
 | `wait_s` | number | 적재/수령 대기 시간 |
+| `node` | string | 로봇이 있는(또는 방금 떠난) 경로 그래프 노드. 대기 중이면 그 자리 노드, 그래프에서 벗어났거나 모르면 `""` |
+| `next_edge` | string | 지금 달리는 복도(edge id). 달리지 않으면 `""` |
+| `route` | string[] | 앞으로 지날 노드 (다음 노드부터, 남은 목적지까지 포함). 달리지 않거나 직접 목표(DIRECT_GOAL)면 `[]`. 로봇끼리 경로 조정(백엔드)용 읽기 전용 정보이며 로봇 동작은 바뀌지 않음 |
 | `result` | `""` `"SUCCEEDED"` `"FAILED"` `"CANCELED"` `"RETURNED"` | 마지막 임무 결과 |
 | `code`, `text` | string | 결과 사유 (아래) |
 | `hold` | bool | 구동부의 장애물 대기 (`obstacle_hold`) |
@@ -373,6 +376,7 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 ---
 
 변경 이력
+- v0.13 (2026-10-21): `mission_status` 에 `node`, `next_edge`, `route` 추가 (경로 정보 노출, 동작 변경 없음). 필드 이름은 자율주행 파트 제안이며 팀 합의 필요. 기존 필드/명령은 그대로.
 - v0.12 (2026-10-20): 코드와 대조해 설명만 바로잡음(필드, 토픽, 동작 변경 없음). front `camera_info` 구독자, `robot_health` 구독 목록, STOP 후진은 실제로 쓰이지 않음, 위치 보류 중 `robot_state`(ERROR/DEGRADED/PAUSED).
 - v0.11 (2026-10-16): 비상 초기화 명령 `reset`(`node`), 알람 `ROBOT_RESET`, 임무 결과 코드 `RESET`, nav2 이름 `initialpose`. 기존 필드/명령은 그대로.
 - v0.10 (2026-10-16): 위치 LOST 처리 (복구 알람은 LOST 를 벗어나면: OK 또는 DEGRADED). `mission_status.localization`, `loc_hold`, 명령 `resume`/`home`, 알람 `LOCALIZATION_LOST`/`LOCALIZATION_UNINITIALIZED`/`LOCALIZATION_RECOVERED`/`LOCALIZATION_HOLD`/`MISSION_RESUMED`/`GO_HOME`, health `reasons`에 `LOCALIZATION_HOLD`. 실행기가 `health`를 구독. 기존 필드/명령은 그대로.

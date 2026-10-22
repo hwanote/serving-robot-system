@@ -973,6 +973,37 @@ def test_status_tells_the_localization_state():
     assert r.core.status()['localization'] == 'DEGRADED'
 
 
+# ----- route info in the status (node / next_edge / route) -------------------------
+def test_status_route_info_while_driving_a_serve_order():
+    r = serving()
+    r.xy = MID_WEST_S
+    r.advance(0.2)
+    st = r.core.status()
+    assert st['node'] == 'W_S' and st['next_edge'] == 'e_west_s'
+    assert st['route'][0] == 'W_M' and 'D' in st['route']
+    assert 'T13' in st['route'] and st['route'][-1] == 'W_S'
+    r.xy = (-3.20, -0.80)                    # past W_S, on e_west_s still
+    r.advance(0.2)
+    assert r.core.status()['route'][0] == 'W_M'
+    r.xy = (-3.20, 0.60)                     # now on e_west_n
+    r.advance(0.2)
+    st = r.core.status()
+    assert st['node'] == 'W_M' and st['next_edge'] == 'e_west_n'
+    assert st['route'][0] == 'W_N'
+
+
+def test_status_route_info_is_empty_or_quiet_when_not_driving():
+    r = Run(real(), W_S)
+    r.advance(0.2)
+    st = r.core.status()
+    assert st['node'] == 'W_S' and st['next_edge'] == '' and st['route'] == []
+    r = serving()
+    drive(r)
+    assert r.core.state == WAIT_LOAD
+    st = r.core.status()
+    assert st['node'] == 'D' and st['next_edge'] == '' and st['route'] == []
+
+
 # ----- operator reset (robot put by hand on a node) --------------------------------
 def test_reset_frees_a_stuck_mission_and_clears_every_timer():
     r = mid_run()
