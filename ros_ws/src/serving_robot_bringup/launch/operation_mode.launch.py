@@ -21,6 +21,7 @@ The start pose of the robot comes from config/common/robot_start.yaml.
 """
 import math
 import os
+import tempfile
 
 import yaml
 
@@ -44,6 +45,20 @@ from launch_ros.actions import Node
 
 from serving_robot_navigation.interfaces import names_for
 from serving_robot_navigation.site_config import load_site
+
+
+def _renamed(path, robot):
+    """Nav2/AMCL/collision YAMLs name /robot_01/... topics. For another robot,
+    return a copy with the name replaced (robot_01 = the file itself)."""
+    if robot == 'robot_01':
+        return path
+    with open(path, 'r', encoding='utf-8') as f:
+        text = f.read().replace('/robot_01/', '/%s/' % robot)
+    out = os.path.join(tempfile.gettempdir(),
+                       '%s_%s' % (robot, os.path.basename(path)))
+    with open(out, 'w', encoding='utf-8') as f:
+        f.write(text)
+    return out
 
 
 def _waiter(name, args, timeout):
@@ -101,8 +116,10 @@ def _build(context, *args, **kwargs):
     start_cfg = LaunchConfiguration('start_config').perform(context)
     with open(start_cfg, 'r', encoding='utf-8') as f:
         pose = yaml.safe_load(f)[nm.robot]['start_pose']
+    home_name = ''
     if 'pose' in pose:
         # named destination from waypoints.yaml (e.g. standby_01)
+        home_name = str(pose['pose'])    # the robot returns to where it starts
         named = load_site().resolve(pose['pose'])
         x, y, yaw = named.x, named.y, named.yaw_rad
     else:
@@ -127,7 +144,9 @@ def _build(context, *args, **kwargs):
     # --- stages --------------------------------------------------------------
     steps = []
 
-    if sim:
+    # world:=false = join a Gazebo world that is already running (2nd robot)
+    with_world = LaunchConfiguration('world').perform(context).lower() == 'true'
+    if sim and with_world:
         steps.append({
             'title': '[operation_mode] Gazebo world',
             'actions': [include(
@@ -151,7 +170,7 @@ def _build(context, *args, **kwargs):
         'actions': [include(
             os.path.join(bringup, 'launch', 'robot_base.launch.py'),
             {'mode': mode, 'spawn_x': str(x), 'spawn_y': str(y),
-             'spawn_yaw': str(yaw)})],
+             'spawn_yaw': str(yaw), 'robot_name': nm.robot})],
         'wait': {
             'name': 'robot', 'args': robot_wait, 'timeout': timeout,
             'ok': '[operation_mode] robot is publishing scan/odom/TF',
@@ -160,6 +179,16 @@ def _build(context, *args, **kwargs):
                     % nm.topic('scan'),
         },
     })
+
+    # Other robots than robot_01: same YAMLs with the topic names replaced.
+    renamed_loc, renamed_nav = {}, {}
+    if nm.robot != 'robot_01':
+        renamed_loc['amcl_params_file'] = _renamed(
+            os.path.join(nav, 'config', 'amcl.yaml'), nm.robot)
+        renamed_nav['nav2_params_file'] = _renamed(
+            os.path.join(nav, 'config', 'nav2.yaml'), nm.robot)
+        renamed_nav['collision_monitor_params_file'] = _renamed(
+            os.path.join(nav, 'config', 'collision_monitor.yaml'), nm.robot)
 
     localization_actions = [include(
         os.path.join(nav, 'launch', 'localization.launch.py'),
@@ -171,6 +200,7 @@ def _build(context, *args, **kwargs):
             'initial_y': str(y),
             'initial_yaw': str(yaw),
             'set_initial_pose': use_start,
+            **renamed_loc,
         })]
     rviz_node = Node(
         package='rviz2', executable='rviz2', name='rviz2', output='log',
@@ -213,7 +243,8 @@ def _build(context, *args, **kwargs):
              'delivery_limit_s': LaunchConfiguration('delivery_limit_s').perform(context),
              'auto_confirm_s': LaunchConfiguration('auto_confirm_s').perform(context),
              'person_limit': LaunchConfiguration('person_limit').perform(context),
-             'robot_name': robot_arg})],
+             'robot_name': robot_arg, 'home_name': home_name,
+             **renamed_nav})],
         'wait': {
             'name': 'nav2',
             'args': ['--lifecycle', 'controller_server',
@@ -271,6 +302,10 @@ def generate_launch_description():
             'robot_name', default_value='',
             description='robot name for the topic names (empty = default_robot of '
                         'config/common/interfaces.yaml)'),
+        DeclareLaunchArgument(
+            'world', default_value='true',
+            description='sim: start the Gazebo world. false = the world is '
+                        'already running (second robot, own ROS_DOMAIN_ID)'),
         DeclareLaunchArgument(
             'person_limit', default_value='true',
             description='person state limits the speed (detector + limiter); false = off'),

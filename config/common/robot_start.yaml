@@ -13,3 +13,7 @@ schema_version: 1
 robot_01:
   start_pose:
     pose: standby_01
+
+robot_02:
+  start_pose:
+    pose: standby_02

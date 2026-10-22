@@ -54,6 +54,7 @@ def generate_launch_description():
             'spawn_x': LaunchConfiguration('spawn_x'),
             'spawn_y': LaunchConfiguration('spawn_y'),
             'spawn_yaw': LaunchConfiguration('spawn_yaw'),
+            'robot_name': LaunchConfiguration('robot_name'),
         }.items(),
         condition=LaunchConfigurationEquals('mode', 'sim'),
     )
@@ -77,6 +78,9 @@ def generate_launch_description():
         DeclareLaunchArgument('spawn_x', default_value='-3.2'),
         DeclareLaunchArgument('spawn_y', default_value='-2.4'),
         DeclareLaunchArgument('spawn_yaw', default_value='0.0'),
+        DeclareLaunchArgument(
+            'robot_name', default_value='robot_01',
+            description='sim only: name of the robot to spawn'),
         sim_robot,
         real_robot_state_publisher,
     ])

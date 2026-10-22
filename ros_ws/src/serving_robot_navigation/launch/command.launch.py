@@ -33,6 +33,9 @@ def _modules(context, *args, **kwargs):
         value = LaunchConfiguration(key).perform(context)
         if value:
             test_overrides[key] = float(value)
+    home = LaunchConfiguration('home_name').perform(context)
+    if home:
+        test_overrides['home_name'] = home   # return pose of this robot
 
     # --- MODULES: one Node per command-section node -----------------------------
     modules = [
@@ -65,5 +68,8 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'auto_confirm_s', default_value='',
             description='test only: confirm load/handover after this many s'),
+        DeclareLaunchArgument(
+            'home_name', default_value='',
+            description='Return pose (empty = executor default standby_01)'),
         OpaqueFunction(function=_modules),
     ])

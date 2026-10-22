@@ -54,6 +54,11 @@ poses:
     yaw_deg: 0.0
     kind: standby
     aliases: [wait_01, home]
+  standby_02:
+    node: C_N
+    yaw_deg: 180.0
+    kind: standby
+    aliases: [wait_02]
   kitchen:
     node: D
     yaw_deg: 90.0

@@ -146,6 +146,10 @@ def generate_launch_description():
             'auto_confirm_s', default_value='',
             description='test only: confirm load/handover after this many s'),
         DeclareLaunchArgument(
+            'home_name', default_value='',
+            description='where the robot returns to (empty = the executor default, '
+                        'standby_01). Another robot: its own standby pose'),
+        DeclareLaunchArgument(
             'person_limit', default_value='true',
             description='Start person_detector + person_state + person_speed_limiter (camera + '
                         'YOLO + LiDAR state limits the speed). false = leave out'),
@@ -222,6 +226,7 @@ def generate_launch_description():
     command = section('command', {
         'delivery_limit_s': LaunchConfiguration('delivery_limit_s'),
         'auto_confirm_s': LaunchConfiguration('auto_confirm_s'),
+        'home_name': LaunchConfiguration('home_name'),
     })
 
     rviz = Node(
