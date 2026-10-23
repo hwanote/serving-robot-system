@@ -37,6 +37,7 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
   const [actionError, setActionError] = useState<string | null>(null)
   const [restartNote, setRestartNote] = useState<string | null>(null)
   const [listOpen, setListOpen] = useState(false)
+  const [regen, setRegen] = useState(false)
 
   const [tick, setTick] = useState(0)
   const refresh = useCallback(() => setTick((n) => n + 1), [])
@@ -64,6 +65,7 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
   const run = async (kind: NonNullable<Working>, job: () => Promise<string | void>) => {
     setWorking(kind)
     setActionError(null)
+    setRegen(false)
     try {
       const done = await job()
       if (done) notify(done, 'success')
@@ -119,20 +121,55 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
 
   const applied = status?.applied ?? null
   const inSync = !!status?.in_sync
-  const live_ok = !!live?.matches_applied
+  const liveOk = !!live?.matches_applied
   const busy = working !== null
-  const canApply = !!status?.draft && !dirty && !busy
-  const canPromote = !!applied && inSync && !live_ok && !dirty && !busy
+  const hasDraft = !!status?.draft
 
-  const applyBadge = !applied ? (
-    <Badge tone="gray">아직 안 함</Badge>
-  ) : inSync ? (
-    <Badge tone="green">완료 · OK {applied.summary.OK} / 경고 {applied.summary.WARN}</Badge>
-  ) : (
-    <Badge tone="amber" dot>
-      초안이 바뀜 · 다시 적용
-    </Badge>
-  )
+  // 지금 어느 단계인지. 한 번에 해야 할 것 하나만 켜지게 한다.
+  //  none      저장된 초안 없음
+  //  editing   편집 중(저장 전)
+  //  toApply   저장함 → 노드·통로 자동 생성 필요
+  //  toPromote 적용 끝남 → 로봇에 반영 필요
+  //  same      로봇 지도와 같음 (바뀐 게 없음)
+  const phase: 'none' | 'editing' | 'toApply' | 'toPromote' | 'same' = dirty
+    ? 'editing'
+    : !hasDraft
+      ? 'none'
+      : applied && inSync && liveOk
+        ? 'same'
+        : applied && inSync
+          ? 'toPromote'
+          : 'toApply'
+  const canRegen = hasDraft && !dirty && (phase === 'same' || phase === 'toPromote')
+  const canApply = hasDraft && !dirty && !busy && (phase === 'toApply' || (canRegen && regen))
+  const canPromote = phase === 'toPromote' && !busy
+
+  const step1 =
+    phase === 'editing' ? (
+      <Badge tone="amber" dot>변경 저장 필요</Badge>
+    ) : phase === 'none' ? (
+      <Badge tone="gray">저장된 초안 없음</Badge>
+    ) : phase === 'same' ? (
+      <Badge tone="gray">변경 없음</Badge>
+    ) : (
+      <Badge tone="green">초안 저장됨</Badge>
+    )
+  const step2 =
+    phase === 'toApply' ? (
+      <Badge tone="amber" dot>자동 생성 필요</Badge>
+    ) : phase === 'toPromote' && applied ? (
+      <Badge tone="green">완료 · OK {applied.summary.OK} / 경고 {applied.summary.WARN}</Badge>
+    ) : (
+      <Badge tone="gray">{phase === 'same' ? '해당 없음' : '아직 안 함'}</Badge>
+    )
+  const step3 =
+    phase === 'toPromote' ? (
+      <Badge tone="amber" dot>반영 필요</Badge>
+    ) : phase === 'same' ? (
+      <Badge tone="gray">로봇 지도와 같아요</Badge>
+    ) : (
+      <Badge tone="gray">아직 이전 지도</Badge>
+    )
 
   return (
     <section className="card" aria-labelledby="live-title">
@@ -153,15 +190,15 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
         <ol className="live-steps" style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <li>
             <span>저장 </span>
-            {dirty ? <Badge tone="amber" dot>변경 저장 필요</Badge> : status?.draft ? <Badge tone="green">초안 저장됨</Badge> : <Badge tone="gray">저장된 초안 없음</Badge>}
+            {step1}
           </li>
           <li>
             <span>노드·통로 자동 생성 </span>
-            {applyBadge}
+            {step2}
           </li>
           <li>
             <span>로봇 지도 </span>
-            {live_ok ? <Badge tone="green">반영됨</Badge> : <Badge tone="gray">아직 이전 지도</Badge>}
+            {step3}
           </li>
         </ol>
 
@@ -184,6 +221,12 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
           </div>
         )}
 
+        {canRegen && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
+            <input type="checkbox" checked={regen} disabled={busy} onChange={(e) => setRegen(e.target.checked)} />
+            동일 지도 노드 재생성
+          </label>
+        )}
         <div className="btn-row">
           <button type="button" className="btn" disabled={!canApply} onClick={onApply} title={dirty ? '먼저 매장 설정을 저장하세요' : undefined}>
             {working === 'apply' ? <span className="spinner spinner-sm" /> : <Icon name="play" size={14} />}

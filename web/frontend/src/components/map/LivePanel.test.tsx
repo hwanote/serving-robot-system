@@ -60,8 +60,55 @@ describe('로봇 지도 반영 패널', () => {
     const list = await screen.findByRole('list', { name: '지도 백업 목록' })
     expect(within(list).getAllByRole('listitem')).toHaveLength(1)
     expect(within(list).getByText(/반영 직전 지도/)).toBeInTheDocument()
-    expect(screen.getByText('반영됨')).toBeInTheDocument()
+    expect(screen.getByText('로봇 지도와 같아요')).toBeInTheDocument()
     expect(button('로봇에 반영')).toBeDisabled()
+  })
+
+  it('반영이 끝나면 단계가 초기화되고, 바뀔 때마다 해야 할 단계 하나만 켜진다', async () => {
+    const user = await openPanel()
+    // 저장해 둔 초안, 아직 적용 안 함 → 자동 생성만 켜짐
+    expect(await screen.findByText('자동 생성 필요')).toBeInTheDocument()
+    expect(button('노드 자동 생성')).toBeEnabled()
+    expect(button('로봇에 반영')).toBeDisabled()
+    await user.click(button('노드 자동 생성'))
+    // 적용 끝남 → 반영만 켜짐
+    expect(await screen.findByText('반영 필요')).toBeInTheDocument()
+    expect(button('로봇에 반영')).toBeEnabled()
+    expect(button('노드 자동 생성')).toBeDisabled()
+    await user.click(button('로봇에 반영'))
+    // 반영 끝남 → 전부 초기화, 둘 다 꺼짐
+    expect(await screen.findByText('로봇 지도와 같아요')).toBeInTheDocument()
+    expect(screen.getByText('변경 없음')).toBeInTheDocument()
+    expect(screen.queryByText(/초안 저장됨|완료 · OK/)).not.toBeInTheDocument()
+    expect(button('노드 자동 생성')).toBeDisabled()
+    expect(button('로봇에 반영')).toBeDisabled()
+    // 새로 바꾸면 편집 중 → 저장 → 자동 생성 필요 로 다시 켜짐
+    await user.click(await screen.findByRole('button', { name: /Table 3/ }))
+    await user.click(screen.getByRole('button', { name: /객체 삭제/ }))
+    expect(await screen.findByText('변경 저장 필요')).toBeInTheDocument()
+    expect(screen.queryByText('로봇 지도와 같아요')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /동일 지도 노드 재생성/ })).not.toBeInTheDocument()
+    await user.click(button('Save Store Setup'))
+    expect(await screen.findByText('자동 생성 필요')).toBeInTheDocument()
+    expect(button('노드 자동 생성')).toBeEnabled()
+    expect(button('로봇에 반영')).toBeDisabled()
+  })
+
+  it('"동일 지도 노드 재생성"을 체크하면 바뀐 게 없어도 노드 자동 생성이 켜지고, 누르면 체크가 풀린다', async () => {
+    const user = await openPanel()
+    await user.click(await screen.findByRole('button', { name: '노드 자동 생성' }))
+    await screen.findByText('반영 필요')
+    await user.click(button('로봇에 반영'))
+    await screen.findByText('로봇 지도와 같아요')
+    const box = screen.getByRole('checkbox', { name: /동일 지도 노드 재생성/ })
+    expect(box).not.toBeChecked()
+    expect(button('노드 자동 생성')).toBeDisabled()
+    await user.click(box)
+    expect(button('노드 자동 생성')).toBeEnabled()
+    await user.click(button('노드 자동 생성'))
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: /동일 지도 노드 재생성/ })).not.toBeChecked())
+    expect(button('노드 자동 생성')).toBeDisabled()
+    expect(screen.getByText('로봇 지도와 같아요')).toBeInTheDocument() // 같은 지도라 그대로
   })
 
   it('저장하지 않은 변경이 있으면 적용·반영을 막는다', async () => {
