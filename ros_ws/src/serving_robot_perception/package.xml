@@ -1,4 +1,4 @@
-<?xml version="1.0"?>
+<?xml version='1.0' encoding='utf-8'?>
 <package format="3">
 
   <name>serving_robot_perception</name>
@@ -31,4 +31,4 @@
     <build_type>ament_python</build_type>
   </export>
 
-</package>
+<exec_depend>serving_robot_navigation</exec_depend><exec_depend>nav_msgs</exec_depend><exec_depend>tf2_ros</exec_depend><exec_depend>python3-numpy</exec_depend><exec_depend>python3-opencv</exec_depend></package>

@@ -54,6 +54,8 @@ setup(
 
     entry_points={
         'console_scripts': [
+            'person_detector = serving_robot_perception.person_detector:main',
+            'semantic_safety = serving_robot_perception.semantic_safety:main',
         ],
     },
 )

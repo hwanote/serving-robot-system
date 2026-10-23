@@ -1,0 +1,97 @@
+world: cafe
+robot_model: robot_01
+model_prefix: test_person_
+people_max: 8
+use_sim_time: true
+control_rate_hz: 10
+pose_timeout_s: 1.0
+robot_stop_radius_m: 0.85
+robot_release_radius_m: 1.05
+person_stop_radius_m: 0.8
+person_release_radius_m: 1.0
+person_radius_m: 0.22
+person_height_m: 1.55
+seed: null
+lanes:
+- start:
+  - 0.0
+  - -1.7
+  end:
+  - 0.0
+  - 2.3
+- start:
+  - -3.15
+  - 1.25
+  end:
+  - -3.15
+  - -0.9
+- start:
+  - 3.15
+  - -1.2
+  end:
+  - 3.15
+  - 1.2
+- start:
+  - -3.0
+  - -0.35
+  end:
+  - -1.05
+  - -0.35
+- start:
+  - 1.0
+  - -0.35
+  end:
+  - 3.0
+  - -0.35
+- start:
+  - 0.7
+  - 1.7
+  end:
+  - 2.5
+  - 1.7
+- start:
+  - 0.8
+  - -2.47
+  end:
+  - 1.7
+  - -2.47
+- start:
+  - 1.55
+  - 2.3
+  end:
+  - 2.3
+  - 2.3
+blockage_corridor: []
+blockage_corridor_half_width_m: 0.6
+behavior:
+  speed:
+    slow:
+      mps: 0.08
+      percent: 20
+    normal:
+      mps: 0.15
+      percent: 60
+    fast:
+      mps: 0.22
+      percent: 20
+  give_way_percent: 80
+  action_percent:
+    continue: 72
+    gradual_stop: 22
+    sudden_stop: 2
+    long_block: 4
+  decision_interval_s:
+  - 8.0
+  - 16.0
+  gradual_stop_duration_s:
+  - 1.0
+  - 2.2
+  gradual_pause_s:
+  - 1.5
+  - 4.0
+  sudden_pause_s:
+  - 0.7
+  - 2.0
+  long_block_pause_s:
+  - 16.0
+  - 36.0
