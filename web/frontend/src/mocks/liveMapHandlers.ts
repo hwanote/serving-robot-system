@@ -86,14 +86,16 @@ function swap(kind: 'promote' | 'restore', target: Snapshot, note: string, backu
   state.backups.unshift(backup)
   state.live = { ...target }
   state.last = { at: new Date().toISOString(), kind, backup_id: backup.id, note, needs_robot_restart: true }
-  const restored = kind === 'restore' && target.semantics ? clone(target.semantics) : null
+  // 저장본이 없는 옛 백업: 서버는 지도 파일에서 편집 화면을 다시 만든다(직접 그린 구역은 빠짐) — Mock 은 지금 초안에서 구역만 비워 흉내
+  const rebuilt = kind === 'restore' && !target.semantics && mockDb.semantics ? { ...clone(mockDb.semantics), zones: [] } : null
+  const restored = kind === 'restore' ? (target.semantics ? clone(target.semantics) : rebuilt) : null
   if (restored) mockDb.semantics = restored
   return HttpResponse.json({
     backup: publicBackup(backup),
     live: state.last,
     semantics: restored,
     semantics_restored: !!restored,
-    semantics_note: kind === 'restore' && !restored ? '이 백업에는 편집 화면 저장본이 없어서 로봇 지도만 되돌렸어요.' : null,
+    semantics_note: kind === 'restore' && !target.semantics ? '이 백업에는 편집 화면 저장본이 없어서 지도 파일에서 다시 만들었어요. 직접 그린 구역은 빠져요.' : null,
   })
 }
 

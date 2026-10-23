@@ -194,21 +194,31 @@ def test_restore_brings_the_editor_draft_back_too(client, base):
     assert ids(client.get(URL).json()) == ids(base)
 
 
-def test_restoring_an_old_backup_without_a_draft_only_changes_the_robot_map(client, base):
+def test_an_old_backup_without_a_draft_rebuilds_the_editor_from_its_map_files(client, base):
     original = tree_hash(live_dir(client))
-    apply(client, changed(base, 4))
+    moved = copy.deepcopy(base)
+    home = next(e for e in moved['entities'] if e['type'] == 'robot_wait')
+    home['pose']['x'] += 0.2                       # the robot's waiting spot was moved
+    apply(client, moved)
     old = client.post(URL + '/promote').json()['backup']
-    assert old['has_semantics'] is False
-    drafted = client.get(URL).json()
+    assert old['has_semantics'] is False           # made before drafts were kept
+    assert ids(client.get(URL).json()) == ids(base)
     r = client.post('%s/backups/%s/restore' % (URL, old['id']))
     assert r.status_code == 200
     body = r.json()
-    assert body['semantics_restored'] is False and body['semantics'] is None
-    assert '편집 화면 저장본이 없어' in body['semantics_note']
+    assert body['semantics_restored'] is True
+    assert '지도 파일에서 다시 만들었어요' in body['semantics_note']
     assert tree_hash(live_dir(client)) == original
-    assert client.get(URL).json() == drafted                 # the editor draft is left alone
+    back = client.get(URL).json()
+    assert back['entities'] == base['entities']     # the waiting spot is where it was
+    assert back['zones'] == []
     listed = {b['id']: b['has_semantics'] for b in client.get(URL + '/backups').json()}
     assert listed[old['id']] is False
+    # and the restore can be undone: the moved spot comes back in the editor
+    undo = body['backup']['id']
+    assert client.post('%s/backups/%s/restore' % (URL, undo)).status_code == 200
+    moved_back = next(e for e in client.get(URL).json()['entities'] if e['id'] == home['id'])
+    assert moved_back['pose']['x'] == home['pose']['x']
 
 
 def test_a_hand_edited_common_is_not_paired_with_a_stale_draft(client, base):

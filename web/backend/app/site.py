@@ -8,6 +8,47 @@ import yaml
 from PIL import Image
 
 
+def semantics_from_config(wp, ent, store_id, revision):
+    """Semantic Map the editor shows for a waypoints.yaml + entities.yaml pair (no user zones:
+    they are not in those files)."""
+    nodes, poses = wp['nodes'], wp['poses']
+    tables = (ent.get('tables') or {})
+    counter = ((ent.get('fixtures') or {}).get('counter') or {}).get('center')
+    entities, waypoints = [], []
+    for pid, p in poses.items():
+        node = nodes[p['node']]
+        wpose = {'x': float(node['x']), 'y': float(node['y']),
+                 'yaw': math.radians(float(p.get('yaw_deg', 0.0)))}
+        kind = p.get('kind')
+        num = pid.rsplit('_', 1)[-1]
+        if kind == 'table_service':
+            etype, label = 'table', '테이블 %d' % int(num)
+            c = (tables.get(pid) or {}).get('center')
+            epose = {'x': float(c['x']), 'y': float(c['y']), 'yaw': 0.0} if c else wpose
+        elif kind == 'pickup':
+            etype, label = 'kitchen', '주방(데스크)'
+            epose = ({'x': float(counter['x']), 'y': float(counter['y']), 'yaw': 0.0}
+                     if counter else wpose)
+        elif kind == 'standby':
+            etype, label, epose = 'robot_wait', '대기 위치 %d' % int(num), wpose
+        else:
+            continue
+        item = {'id': pid, 'type': etype, 'label': label, 'pose': epose}
+        if etype == 'table':
+            # real values from entities.yaml (never a made-up default)
+            top = (tables.get(pid) or {}).get('top_size_m')
+            if top:
+                item['top_size_m'] = {'x': float(top['x']), 'y': float(top['y'])}
+            chairs = (tables.get(pid) or {}).get('chairs')
+            if chairs:
+                item['chairs'] = [{'dx': float(c['dx']), 'dy': float(c['dy']),
+                                  'size_m': float(c['size_m'])} for c in chairs]
+        entities.append(item)
+        waypoints.append({'id': 'wp_' + pid, 'entity_id': pid, 'pose': wpose})
+    return {'store_id': store_id, 'map_revision': revision,
+            'entities': entities, 'waypoints': waypoints, 'zones': []}
+
+
 class Site:
     def __init__(self, repo, store_id):
         self.store_id, self.repo = store_id, repo
@@ -135,39 +176,4 @@ class Site:
         }
 
     def _build_semantics(self):
-        nodes, poses = self.wp['nodes'], self.wp['poses']
-        tables = (self.ent.get('tables') or {})
-        counter = ((self.ent.get('fixtures') or {}).get('counter') or {}).get('center')
-        entities, waypoints = [], []
-        for pid, p in poses.items():
-            node = nodes[p['node']]
-            wpose = {'x': float(node['x']), 'y': float(node['y']),
-                     'yaw': math.radians(float(p.get('yaw_deg', 0.0)))}
-            kind = p.get('kind')
-            num = pid.rsplit('_', 1)[-1]
-            if kind == 'table_service':
-                etype, label = 'table', '테이블 %d' % int(num)
-                c = (tables.get(pid) or {}).get('center')
-                epose = {'x': float(c['x']), 'y': float(c['y']), 'yaw': 0.0} if c else wpose
-            elif kind == 'pickup':
-                etype, label = 'kitchen', '주방(데스크)'
-                epose = ({'x': float(counter['x']), 'y': float(counter['y']), 'yaw': 0.0}
-                         if counter else wpose)
-            elif kind == 'standby':
-                etype, label, epose = 'robot_wait', '대기 위치 %d' % int(num), wpose
-            else:
-                continue
-            ent = {'id': pid, 'type': etype, 'label': label, 'pose': epose}
-            if etype == 'table':
-                # real values from entities.yaml (never a made-up default)
-                top = (tables.get(pid) or {}).get('top_size_m')
-                if top:
-                    ent['top_size_m'] = {'x': float(top['x']), 'y': float(top['y'])}
-                chairs = (tables.get(pid) or {}).get('chairs')
-                if chairs:
-                    ent['chairs'] = [{'dx': float(c['dx']), 'dy': float(c['dy']),
-                                      'size_m': float(c['size_m'])} for c in chairs]
-            entities.append(ent)
-            waypoints.append({'id': 'wp_' + pid, 'entity_id': pid, 'pose': wpose})
-        return {'store_id': self.store_id, 'map_revision': self.revision,
-                'entities': entities, 'waypoints': waypoints, 'zones': []}
+        return semantics_from_config(self.wp, self.ent, self.store_id, self.revision)

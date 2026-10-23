@@ -131,8 +131,8 @@ describe('로봇 지도 반영 패널', () => {
     expect(screen.queryByRole('button', { name: /Table 3/ })).not.toBeInTheDocument()
     // 최신 백업 = Table 3 이 있던 때의 지도 → 편집 저장본도 같이 들어 있다
     const items = within(screen.getByRole('list', { name: '지도 백업 목록' })).getAllByRole('listitem')
-    expect(within(items[0]!).queryByText(/편집 저장본 없음/)).not.toBeInTheDocument()
-    expect(within(items[1]!).getByText(/편집 저장본 없음/)).toBeInTheDocument() // 처음 지도에는 저장본이 없었다
+    expect(within(items[0]!).queryByText(/지도 파일에서 복원/)).not.toBeInTheDocument()
+    expect(within(items[1]!).getByText(/지도 파일에서 복원/)).toBeInTheDocument() // 처음 지도에는 저장본이 없었다
     await user.click(within(items[0]!).getByRole('button', { name: /백업으로 복구/ }))
     expect(await screen.findByRole('button', { name: /Table 3/ })).toBeInTheDocument()
     expect(screen.getByText(/편집 화면도 그때 모습으로 바뀌었어요/)).toBeInTheDocument()
@@ -140,7 +140,7 @@ describe('로봇 지도 반영 패널', () => {
     expect(vi.mocked(window.confirm).mock.calls.at(-1)![0]).toMatch(/편집 화면.*저장본도 이 백업 때 모습으로/)
   })
 
-  it('저장 안 한 변경이 있으면 경고하고, 저장본이 없는 옛 백업은 로봇 지도만 되돌린다', async () => {
+  it('저장 안 한 변경이 있으면 경고하고, 저장본이 없는 옛 백업은 지도 파일에서 편집 화면을 다시 만든다', async () => {
     const user = await openPanel()
     await user.click(await screen.findByRole('button', { name: '노드 자동 생성' }))
     await screen.findByText(/완료 · OK 21/)
@@ -154,9 +154,9 @@ describe('로봇 지도 반영 패널', () => {
     await user.click(within(item).getByRole('button', { name: /백업으로 복구/ }))
     const msg = String(vi.mocked(window.confirm).mock.calls.at(-1)![0])
     expect(msg).toMatch(/저장하지 않은 변경이 있어요/)
-    expect(msg).toMatch(/편집 화면 저장본이 없어서/)
-    expect(await screen.findByText(/로봇 지도만 되돌렸어요/)).toBeInTheDocument()
-    expect(screen.getByText('변경 저장 필요')).toBeInTheDocument() // 편집 중인 내용은 그대로
+    expect(msg).toMatch(/지도 파일에서 다시 만들어요/)
+    expect(await screen.findByText(/지도 파일에서 다시 만들었어요/)).toBeInTheDocument()
+    expect(screen.queryByText('변경 저장 필요')).not.toBeInTheDocument() // 편집 중이던 내용은 사라지고 복원본으로 바뀜
   })
 
   it('확인창에서 취소하면 아무것도 바뀌지 않는다', async () => {

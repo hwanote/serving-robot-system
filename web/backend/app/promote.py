@@ -21,6 +21,7 @@ import time
 
 import yaml
 
+from .site import semantics_from_config
 from .semantics import SemanticError, _atomic_json, _read_json, digest, validate
 from .util import now_iso
 
@@ -292,15 +293,27 @@ class LiveConfig:
                     'semantics_note': note}
 
     def _restore_draft(self, folder):
-        """Bring the editor's saved draft back too. Returns (doc or None, why-not note)."""
+        """Bring the editor's saved draft back too. Returns (doc or None, note for the person).
+        A backup made before drafts were kept has none: the editor view is rebuilt from the
+        backup's own map files instead (positions of tables, kitchen and robot waiting spots;
+        zones the person drew are not in those files and come back empty)."""
         saved = _read_json(os.path.join(folder, 'semantics.json'))
         doc = saved.get('semantics') if isinstance(saved, dict) else None
+        note = None
         if not isinstance(doc, dict):
-            return None, '이 백업에는 편집 화면 저장본이 없어서 로봇 지도만 되돌렸어요.'
+            try:
+                with open(os.path.join(folder, 'waypoints.yaml'), encoding='utf-8') as f:
+                    wp = yaml.safe_load(f)
+                with open(os.path.join(folder, 'entities.yaml'), encoding='utf-8') as f:
+                    ent = yaml.safe_load(f) or {}
+                doc = semantics_from_config(wp, ent, self.site.store_id, self.site.revision)
+            except Exception as e:
+                return None, '편집 화면을 다시 만들지 못해 로봇 지도만 되돌렸어요: %s' % e
+            note = '이 백업에는 편집 화면 저장본이 없어서 지도 파일에서 다시 만들었어요. 직접 그린 구역은 빠져요.'
         try:
             validate(doc, self.site.store_id, self.site.revision)
         except SemanticError as e:
             return None, '편집 화면 저장본이 지금 지도와 맞지 않아 로봇 지도만 되돌렸어요: %s' % e.message
         _atomic_json(self._draft_path, {'saved_at': now_iso(), 'sha': digest(doc), 'semantics': doc})
         _atomic_json(self._live_sem_path, {'common_sha': _dir_sha(self.common), 'semantics': doc})
-        return doc, None
+        return doc, note

@@ -99,7 +99,7 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
       '· 주문이 진행 중이면 되돌려지지 않아요.',
       "· 로봇은 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 해요.",
     ]
-    if (b.has_semantics === false) lines.push('· 이 백업에는 편집 화면 저장본이 없어서, 편집 화면의 위치는 그대로 두고 로봇 지도만 되돌아와요.')
+    if (b.has_semantics === false) lines.push('· 이 백업에는 편집 화면 저장본이 없어서, 편집 화면은 지도 파일에서 다시 만들어요. 직접 그린 구역은 빠져요.')
     else lines.push('· 편집 화면(Raw Map · Semantic 편집)의 저장본도 이 백업 때 모습으로 바뀌어요.')
     if (dirty) lines.push('', '⚠ 저장하지 않은 변경이 있어요. 되돌리면 그 변경은 사라져요.')
     if (!window.confirm(lines.join('\n'))) return
@@ -107,7 +107,11 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
       const r = await restoreBackup(storeId, b.id)
       if (r.semantics_restored && r.semantics) onRestored?.(r.semantics)
       const base = `${formatBackupTime(b)} 백업으로 되돌렸어요. 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 로봇이 새 지도로 움직여요.`
-      const extra = r.semantics_restored ? ' 편집 화면도 그때 모습으로 바뀌었어요. 로봇에 다시 반영하려면 "노드 자동 생성"부터 해 주세요.' : r.semantics_note ? ` (${r.semantics_note})` : ''
+      const extra = r.semantics_restored
+        ? ` 편집 화면도 그때 모습으로 바뀌었어요.${r.semantics_note ? ` (${r.semantics_note})` : ''} 로봇에 다시 반영하려면 "노드 자동 생성"부터 해 주세요.`
+        : r.semantics_note
+          ? ` (${r.semantics_note})`
+          : ''
       setRestartNote(base + extra)
       return '백업으로 되돌렸어요.'
     })
@@ -219,7 +223,7 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
                       </div>
                       <div className="muted" style={{ fontSize: 12 }}>
                         {KIND_LABEL[b.kind]} · {summaryText(b)}
-                        {b.has_semantics === false ? ' · 편집 저장본 없음' : ''}
+                        {b.has_semantics === false ? ' · 지도 파일에서 복원' : ''}
                       </div>
                     </div>
                     <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onRestore(b)} aria-label={`${formatBackupTime(b)} 백업으로 복구`}>
