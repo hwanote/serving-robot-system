@@ -3,10 +3,10 @@
 draft    what the person last saved from the map-setup screen
          data/semantics/<store>.json
 applied  what tools/site_builder (automatic nodes and corridors) made from that draft
-         data/generated/<store>/   status: provisional, never written to config/common
+         data/generated/<store>/   status: provisional
 
-Saving a draft never changes where the robots drive: they read config/common. A person
-copies an applied result there after checking it (same rule as tools/site_builder).
+Saving a draft or applying it never changes where the robots drive: they read config/common.
+Putting an applied result there is a separate step with dated backups (promote.py).
 """
 import hashlib
 import json

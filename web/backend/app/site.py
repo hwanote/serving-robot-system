@@ -10,12 +10,8 @@ from PIL import Image
 
 class Site:
     def __init__(self, repo, store_id):
-        self.store_id = store_id
-        cfg = os.path.join(repo, 'config', 'common')
-        with open(os.path.join(cfg, 'waypoints.yaml'), encoding='utf-8') as f:
-            self.wp = yaml.safe_load(f)
-        with open(os.path.join(cfg, 'entities.yaml'), encoding='utf-8') as f:
-            self.ent = yaml.safe_load(f)
+        self.store_id, self.repo = store_id, repo
+        self._load_config()
         mdir = os.path.join(repo, 'maps', 'stores', store_id)
         self.map_yaml_path = os.path.join(mdir, 'map.yaml')
         with open(self.map_yaml_path, encoding='utf-8') as f:
@@ -26,9 +22,31 @@ class Site:
         img.save(buf, format='PNG')
         self.png = buf.getvalue()
         self.revision = 1
+        self._rebuild()
+
+    def _load_config(self):
+        cfg = os.path.join(self.repo, 'config', 'common')
+        with open(os.path.join(cfg, 'waypoints.yaml'), encoding='utf-8') as f:
+            self.wp = yaml.safe_load(f)
+        with open(os.path.join(cfg, 'entities.yaml'), encoding='utf-8') as f:
+            self.ent = yaml.safe_load(f)
+
+    def _rebuild(self):
         self.semantics = self._build_semantics()
         self.tables = [e['id'] for e in self.semantics['entities'] if e['type'] == 'table']
         self._build_graph()
+
+    def reload(self):
+        """Read config/common again (after the map was replaced). The map image stays.
+        Everything is built on the side first, so a broken file leaves the old data in place."""
+        old = (self.wp, self.ent, self.semantics, self.tables, self.nodes, self.edges, self._adj)
+        try:
+            self._load_config()
+            self._rebuild()
+        except Exception:
+            (self.wp, self.ent, self.semantics, self.tables,
+             self.nodes, self.edges, self._adj) = old
+            raise
 
     # ---- route graph
     def _build_graph(self):

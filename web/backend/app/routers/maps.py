@@ -89,3 +89,38 @@ def semantics_status(store_id: str, request: Request):
     if store_id != state.site.store_id:
         return _no_semantics()
     return state.semantics.status()
+
+
+# ---- put the applied map into config/common (what the robots read), with dated backups
+@router.get('/api/stores/{store_id}/semantics/live')
+def live_status(store_id: str, request: Request):
+    if store_id != request.app.state.site.store_id:
+        return _no_semantics()
+    return request.app.state.live.status()
+
+
+@router.post('/api/stores/{store_id}/semantics/promote')
+async def promote(store_id: str, request: Request):
+    if store_id != request.app.state.site.store_id:
+        return _no_semantics()
+    try:
+        return await run_in_threadpool(request.app.state.live.promote)
+    except SemanticError as e:
+        return _semantic_err(e)
+
+
+@router.get('/api/stores/{store_id}/semantics/backups')
+def list_backups(store_id: str, request: Request):
+    if store_id != request.app.state.site.store_id:
+        return _no_semantics()
+    return request.app.state.live.list_backups()
+
+
+@router.post('/api/stores/{store_id}/semantics/backups/{backup_id}/restore')
+async def restore_backup(store_id: str, backup_id: str, request: Request):
+    if store_id != request.app.state.site.store_id:
+        return _no_semantics()
+    try:
+        return await run_in_threadpool(request.app.state.live.restore, backup_id)
+    except SemanticError as e:
+        return _semantic_err(e)

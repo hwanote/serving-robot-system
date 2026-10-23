@@ -39,6 +39,19 @@ Task 필드: `task_id type destination_id status robot_id created_at updated_at`
 | PUT | `/api/stores/{id}/semantics?apply=true` | 초안 저장 + **자동 노드 생성·적용**. 성공하면 저장본에 `apply_result` 를 덧붙여 돌려줘요 |
 | POST | `/api/stores/{id}/semantics/apply` | 저장해 둔 초안을 다시 보내지 않고 적용 (초안이 없으면 409 `NO_DRAFT`) |
 | GET | `/api/stores/{id}/semantics/status` | `{draft, applied, in_sync, require_drive_test}`. `in_sync` 는 적용 결과가 지금 초안과 같은지 |
+| GET | `/api/stores/{id}/semantics/live` | 로봇이 읽는 지도(`config/common`) 상태: `{live_sha, matches_applied, last, backup_count}`. `last` = 마지막 반영/복구 기록 |
+| POST | `/api/stores/{id}/semantics/promote` | **적용 결과를 `config/common` 에 반영.** 먼저 지금 지도를 `data/backups/<store>/<YYYYMMDD-HHMMSS>/` 에 백업(여러 개 계속 보관). 응답 `{backup, live}`, `live.needs_robot_restart=true` — **로봇 노드는 시작할 때만 읽으니 다시 켜야 함** |
+| GET | `/api/stores/{id}/semantics/backups` | 백업 목록(최신순): `{id, created_at, kind(promote/before_restore), note, summary{nodes,edges,tables}}` |
+| POST | `/api/stores/{id}/semantics/backups/{backup_id}/restore` | 그 백업으로 되돌림. 되돌리기 전 지도도 `before_restore` 백업으로 남아서 다시 취소 가능 |
+
+반영·복구가 거절되면 (초안·적용 결과·`config/common` 은 그대로):
+| 상태 / code | 뜻 |
+|---|---|
+| 409 `ORDERS_ACTIVE` | 주문이 대기 중이거나 로봇이 수행/복귀 중 |
+| 409 `NOT_APPLIED` / `NOT_IN_SYNC` / `ALREADY_LIVE` | 적용 결과가 없음 / 초안이 적용 결과보다 새로움 / 이미 같은 지도 |
+| 422 `ROBOT_LOADER_REJECTED` / `MISSING_STANDBY` / `MISSING_KITCHEN` / `INCOMPLETE` | 로봇 로더가 거절 / 로봇 번호에 맞는 `standby_NN` 이 없음(`details.robots`) / 주방 위치 없음 / 파일이 빠짐 |
+| 404 `BACKUP_NOT_FOUND` | 없는 백업 id |
+| 500 `PROMOTE_FAILED` | 바꾸다 실패 — 원래 지도로 되돌려 둠 |
 
 적용이 거절되면 **초안은 저장된 채로** 아래 오류가 나요 (`message` 는 사람용, `details` 는 프로그램용).
 | 상태 / code | 뜻 |

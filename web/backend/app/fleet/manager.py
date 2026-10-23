@@ -50,6 +50,19 @@ class FleetManager:
         self.log = []
         self.dispatch_paused = False
 
+    def is_busy(self):
+        """True while an order is waiting or a robot is driving one (or going home)."""
+        with self.lock:
+            return bool(self.queue) or any(r.active or r.homing for r in self.robots.values())
+
+    def refresh_site(self):
+        """The map was replaced: take the kitchen and the robots' home again."""
+        with self.lock:
+            self.kitchen_node = self.site.node_of_pose(self.kitchen)
+            self.kitchen_xy = self.site.node_xy(self.kitchen)
+            for r in self.robots.values():
+                r.home = self.site.home_of(r.name)
+
     # ---- helpers
     def note(self, text):
         line = '%s %s' % (now_iso(), text)
