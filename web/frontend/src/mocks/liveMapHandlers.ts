@@ -5,6 +5,7 @@
  */
 import { delay, http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '../config/env'
+import type { SemanticMap } from '../types/contracts'
 import { hasErrors, validateSemanticMap } from '../utils/semantic'
 import { mockDb } from './db'
 import { MOCK_STORE_ID } from './fixtures'
@@ -14,6 +15,8 @@ const api = (path: string) => `${API_BASE_URL}/api/stores/:storeId/semantics${pa
 interface Snapshot {
   sha: string
   summary: { nodes: number; edges: number; tables: number }
+  /** 그 지도를 만든 편집 화면 저장본 (없을 수 있음) */
+  semantics?: SemanticMap | null
 }
 interface Backup extends Snapshot {
   id: string
@@ -71,15 +74,27 @@ async function pause() {
 }
 
 function publicBackup(b: Backup) {
-  return { id: b.id, created_at: b.created_at, kind: b.kind, note: b.note, summary: b.summary }
+  return { id: b.id, created_at: b.created_at, kind: b.kind, note: b.note, summary: b.summary, has_semantics: !!b.semantics }
 }
 
+const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T
+
 function swap(kind: 'promote' | 'restore', target: Snapshot, note: string, backupKind: Backup['kind'], backupNote: string) {
-  const backup: Backup = { id: newId(), created_at: new Date().toISOString(), kind: backupKind, note: backupNote, ...state.live }
+  // 복구 직전 백업에는 지금 편집 화면에 보이는 저장본을 담는다 (실제 백엔드와 같은 규칙)
+  const keep = backupKind === 'before_restore' ? (mockDb.semantics ? clone(mockDb.semantics) : null) : (state.live.semantics ?? null)
+  const backup: Backup = { id: newId(), created_at: new Date().toISOString(), kind: backupKind, note: backupNote, ...state.live, semantics: keep }
   state.backups.unshift(backup)
   state.live = { ...target }
   state.last = { at: new Date().toISOString(), kind, backup_id: backup.id, note, needs_robot_restart: true }
-  return HttpResponse.json({ backup: publicBackup(backup), live: state.last })
+  const restored = kind === 'restore' && target.semantics ? clone(target.semantics) : null
+  if (restored) mockDb.semantics = restored
+  return HttpResponse.json({
+    backup: publicBackup(backup),
+    live: state.last,
+    semantics: restored,
+    semantics_restored: !!restored,
+    semantics_note: kind === 'restore' && !restored ? '이 백업에는 편집 화면 저장본이 없어서 로봇 지도만 되돌렸어요.' : null,
+  })
 }
 
 export const liveMapHandlers = [
@@ -119,7 +134,7 @@ export const liveMapHandlers = [
     if (state.applied.source_sha !== draftSha()) return fail(409, 'NOT_IN_SYNC', '저장한 초안이 적용 결과보다 새로워요. 다시 적용한 뒤 반영해 주세요.')
     if (busy()) return fail(409, 'ORDERS_ACTIVE', '주문이 진행 중이거나 대기 중이라 지도를 바꿀 수 없어요. 주문이 끝난 뒤에 다시 시도해 주세요.')
     if (state.applied.source_sha === state.live.sha) return fail(409, 'ALREADY_LIVE', '이미 로봇이 읽는 지도와 같아요.')
-    return swap('promote', { sha: state.applied.source_sha, summary: currentSummary() }, '적용 결과를 로봇 지도로 반영', 'promote', '적용 결과를 반영하기 전 지도')
+    return swap('promote', { sha: state.applied.source_sha, summary: currentSummary(), semantics: mockDb.semantics ? clone(mockDb.semantics) : null }, '적용 결과를 로봇 지도로 반영', 'promote', '적용 결과를 반영하기 전 지도')
   }),
 
   http.get(api('/backups'), async () => {

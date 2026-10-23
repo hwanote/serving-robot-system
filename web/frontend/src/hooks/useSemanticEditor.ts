@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { toApiError } from '../api/client'
 import { putSemantics } from '../api/semanticApi'
+import type { SemanticMap } from '../types/contracts'
 import { useStoreData } from '../state/storeDataContext'
 import { useToast } from '../state/toastContext'
 import { checkRevision, createEmptySemanticMap, hasErrors, toSemanticPayload, validateSemanticMap } from '../utils/semantic'
@@ -76,9 +77,20 @@ export function useSemanticEditor() {
     await reloadSemantics()
   }, [serverDoc, storeId, mapRevision, reloadSemantics])
 
+  /** 서버가 저장본을 바꿔 놓았을 때(지난 지도 복구): 편집 중인 내용을 버리고 그 문서로 바꾼다 */
+  const replaceDraft = useCallback(
+    (doc: SemanticMap) => {
+      loadedKey.current = `${serializeDoc(doc)}|${mapRevision ?? 'nomap'}`
+      dispatch({ type: 'load', doc })
+      setSemantics(doc)
+      setSaveError(null)
+    },
+    [mapRevision, setSemantics],
+  )
+
   const rebase = useCallback(() => {
     if (map) dispatch({ type: 'rebase_revision', revision: map.map_revision })
   }, [map])
 
-  return { state, dispatch, dirty, issues, revision, canSave, saving, saveError, save, discard, rebase, map }
+  return { state, dispatch, dirty, issues, revision, canSave, saving, saveError, save, discard, replaceDraft, rebase, map }
 }

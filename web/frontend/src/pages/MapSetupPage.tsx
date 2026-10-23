@@ -312,7 +312,7 @@ export function MapSetupPage() {
             </div>
           </section>
 
-          {map && <LivePanel storeId={state.doc.store_id} dirty={dirty} savedKey={semantics.data} />}
+          {map && <LivePanel storeId={state.doc.store_id} dirty={dirty} savedKey={semantics.data} onRestored={editor.replaceDraft} />}
 
           <section className="card" aria-labelledby="inspector-title">
             <div className="card-header">

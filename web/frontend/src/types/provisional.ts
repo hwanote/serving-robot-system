@@ -6,7 +6,7 @@
  * 실제 Backend 확정 시 이 파일과 src/api/* 파서만 수정한다.
  * 상태 문자열은 contracts.ts 의 공통 값만 사용한다.
  */
-import type { TaskStatus } from './contracts'
+import type { SemanticMap, TaskStatus } from './contracts'
 
 /** POST /api/tasks 응답 및 GET /api/tasks 항목 */
 export interface Task {
@@ -71,12 +71,19 @@ export interface MapBackup {
   kind: 'promote' | 'before_restore'
   note: string
   summary: { nodes: number; edges: number; tables: number } | null
+  /** 그 지도를 만든 편집 화면 저장본이 백업에 같이 있는지 (옛 백엔드면 null) */
+  has_semantics: boolean | null
 }
 
 /** POST promote / restore 응답 */
 export interface LiveChangeResult {
   backup: MapBackup
   live: NonNullable<LiveStatus['last']>
+  /** 복구 때 함께 되돌려진 편집 화면 저장본 (없으면 null) */
+  semantics: SemanticMap | null
+  semantics_restored: boolean
+  /** 편집 화면 저장본을 되돌리지 못했을 때의 이유 */
+  semantics_note: string | null
 }
 
 // ---------- 로봇 카드 버튼 (리셋 / 홈 / 지도 다시 읽기) ----------

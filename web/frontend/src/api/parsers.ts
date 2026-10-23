@@ -219,7 +219,11 @@ function parseBackup(value: unknown, where = 'backup'): MapBackup {
     const s = obj(o.summary, `${where}.summary`)
     summary = { nodes: num(s.nodes, `${where}.summary.nodes`), edges: num(s.edges, `${where}.summary.edges`), tables: num(s.tables, `${where}.summary.tables`) }
   }
-  return { id: str(o.id, `${where}.id`), created_at: str(o.created_at, `${where}.created_at`), kind, note: typeof o.note === 'string' ? o.note : '', summary }
+  return { id: str(o.id, `${where}.id`), created_at: str(o.created_at, `${where}.created_at`), kind,
+    note: typeof o.note === 'string' ? o.note : '',
+    summary,
+    has_semantics: typeof o.has_semantics === 'boolean' ? o.has_semantics : null,
+  }
 }
 
 export function parseBackups(value: unknown): MapBackup[] {
@@ -249,7 +253,14 @@ export function parseLiveChange(value: unknown): LiveChangeResult {
   const o = obj(value, 'result')
   const last = parseLast(o.live)
   if (!last) throw new ContractError('result.live: 값이 없습니다.')
-  return { backup: parseBackup(o.backup, 'result.backup'), live: last }
+  const hasDoc = o.semantics !== undefined && o.semantics !== null
+  return {
+    backup: parseBackup(o.backup, 'result.backup'),
+    live: last,
+    semantics: hasDoc ? parseSemanticMap(o.semantics) : null,
+    semantics_restored: o.semantics_restored === true && hasDoc,
+    semantics_note: typeof o.semantics_note === 'string' ? o.semantics_note : null,
+  }
 }
 
 export function parseSemanticStatus(value: unknown): SemanticStatus {
