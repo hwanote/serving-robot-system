@@ -67,6 +67,24 @@ from serving_robot_mapping.mapping_completion_verifier import verify_closed_free
 
 from serving_robot_mapping.mapping_path_risk import MappingPathRiskGuard
 
+# R16_HOLD_EXCLUDE
+# A goal whose navigation was canceled by OBSTACLE_HOLD_NOT_CLEAR (the robot
+# stood too close to a wall and the soft stop would not release) is not picked
+# again, together with other viewpoints within this radius. The exclusion lasts
+# for the whole run (the list is capped); MAP_COMPLETE is never claimed because
+# of it. See navigation_finished.
+HOLD_EXCLUDE_RADIUS_M = 0.6
+HOLD_EXCLUDE_MAX = 50
+
+
+def near_hold_excluded(x, y, excluded):
+    """True when (x, y) is within HOLD_EXCLUDE_RADIUS_M of an excluded goal."""
+    return any(
+        math.hypot(x - ex, y - ey) <= HOLD_EXCLUDE_RADIUS_M
+        for ex, ey in excluded
+    )
+
+
 class ExplorationManager(Node):
     """Manage the autonomous mapping process."""
 
@@ -411,6 +429,7 @@ class ExplorationManager(Node):
             raise ValueError("Invalid recovery stable time")
         self.navigation_rearm_pending = False
         self.visited_frontiers = []
+        self.hold_excluded_goals = []
 
         self.declare_parameter("mapping.lidar_only", False)
         self.mapping_lidar_only = self.get_parameter(
@@ -691,6 +710,12 @@ class ExplorationManager(Node):
                 ):
                     continue
 
+                # R16_HOLD_EXCLUDE: stood too close to a wall here before.
+                if near_hold_excluded(
+                    x, y, getattr(self, "hold_excluded_goals", ())
+                ):
+                    continue
+
                 seen.add(key)
                 selected.append((x, y))
 
@@ -759,6 +784,12 @@ class ExplorationManager(Node):
                     ):
                         continue
 
+                    # R16_HOLD_EXCLUDE
+                    if near_hold_excluded(
+                        x, y, getattr(self, "hold_excluded_goals", ())
+                    ):
+                        continue
+
                     seen.add(key)
                     selected.append((x, y))
 
@@ -814,6 +845,12 @@ class ExplorationManager(Node):
                 if any(
                     math.hypot(vx - px, vy - py) <= 0.25
                     for px, py in visited
+                ):
+                    continue
+
+                # R16_HOLD_EXCLUDE
+                if near_hold_excluded(
+                    vx, vy, getattr(self, "hold_excluded_goals", ())
                 ):
                     continue
 
@@ -1069,6 +1106,10 @@ class ExplorationManager(Node):
             if all(
                 math.hypot(goal.x - x, goal.y - y) > 0.25
                 for x, y in self.visited_frontiers
+            )
+            # R16_HOLD_EXCLUDE
+            and not near_hold_excluded(
+                goal.x, goal.y, getattr(self, "hold_excluded_goals", ())
             )
         ]
 
@@ -1521,6 +1562,25 @@ class ExplorationManager(Node):
             outcome == "FAILED"
             and reason == "Nav2 result status=6"
         )
+
+        # R16_HOLD_EXCLUDE
+        # The robot stopped for an obstacle hold on the way to this goal
+        # (typically a viewpoint right at a wall). Do not pick it again.
+        if (
+            recoverable_cancel
+            and safety_code == "OBSTACLE_HOLD_NOT_CLEAR"
+            and goal is not None
+        ):
+            excluded = list(getattr(self, "hold_excluded_goals", ()))
+            excluded.append((goal.x, goal.y))
+            self.hold_excluded_goals = excluded[-HOLD_EXCLUDE_MAX:]
+            self.get_logger().warn(
+                "Goal canceled by OBSTACLE_HOLD_NOT_CLEAR is excluded: "
+                f"({goal.x:.2f}, {goal.y:.2f}) radius "
+                f"{HOLD_EXCLUDE_RADIUS_M:.2f} m; "
+                f"excluded_holds={len(self.hold_excluded_goals)}. "
+                "MAP_COMPLETE not asserted."
+            )
 
         if recoverable_cancel or route_failure:
             self.navigation_recovery_until = (
