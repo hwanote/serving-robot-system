@@ -83,7 +83,7 @@ function ControlRow({ robot, stale, actions }: { robot: RobotView; stale: boolea
           {actions.pending === 'reset' ? <span className="spinner spinner-sm" /> : null} 리셋
         </button>
         <button type="button" className="btn btn-sm" disabled={homeOff} onClick={actions.onHome} title={homeOff && !stale ? homeHint(robot) : '대기 위치로 보냅니다'}>
-          {actions.pending === 'home' ? <span className="spinner spinner-sm" /> : <Icon name="home" size={13} />} 홈
+          {actions.pending === 'home' ? <span className="spinner spinner-sm" /> : <Icon name="home" size={13} />} 대기 위치로
         </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

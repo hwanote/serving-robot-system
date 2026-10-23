@@ -86,7 +86,7 @@ export interface LiveChangeResult {
   semantics_note: string | null
 }
 
-// ---------- 로봇 카드 버튼 (리셋 / 홈 / 지도 다시 읽기) ----------
+// ---------- 로봇 카드 버튼 (리셋 / 대기 위치로 / 지도 다시 읽기) ----------
 
 /** 백엔드가 계산해서 robot_state 이벤트에 싣는 카드 버튼 규칙. 화면은 이 값만 따른다. */
 export interface RobotControls {

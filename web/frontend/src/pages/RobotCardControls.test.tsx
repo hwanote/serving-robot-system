@@ -46,7 +46,7 @@ function capture(path: string, status = 200, body: Record<string, unknown> = { r
   return calls
 }
 
-describe('로봇 카드 버튼 (리셋 / 홈 / 지도 다시 읽기)', () => {
+describe('로봇 카드 버튼 (리셋 / 대기 위치로 / 지도 다시 읽기)', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('리셋 위치 기본값은 대기 위치이고, 확인 후 POST /reset 에 node 를 보낸다', async () => {
@@ -63,7 +63,7 @@ describe('로봇 카드 버튼 (리셋 / 홈 / 지도 다시 읽기)', () => {
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(confirm.mock.calls[0][0]).toMatch(/직접 올려놓으셨나요/)
     await waitFor(() => expect(calls).toEqual(['{"node":"kitchen"}']))
-    expect(await screen.findByText(/위치가 잡히면 홈 버튼/)).toBeInTheDocument()
+    expect(await screen.findByText(/위치가 잡히면 '대기 위치로' 버튼/)).toBeInTheDocument()
   })
 
   it('확인창에서 취소하면 아무것도 보내지 않는다', async () => {
@@ -75,24 +75,24 @@ describe('로봇 카드 버튼 (리셋 / 홈 / 지도 다시 읽기)', () => {
     expect(calls).toEqual([])
   })
 
-  it('위치를 잃으면 안내가 뜨고 홈은 꺼져 있다 (리셋 먼저)', async () => {
+  it('위치를 잃으면 안내가 뜨고 대기 위치로 버튼은 꺼져 있다 (리셋 먼저)', async () => {
     const { card } = await openPage({ localization: 'LOST', controls: controls({ home: false }) })
     expect(within(card).getByRole('status')).toHaveTextContent(/위치를 모릅니다/)
-    const home = within(card).getByRole('button', { name: /홈/ })
+    const home = within(card).getByRole('button', { name: /대기 위치로/ })
     expect(home).toBeDisabled()
     expect(home).toHaveAttribute('title', expect.stringMatching(/먼저 리셋/))
   })
 
-  it('홈이 켜져 있으면 POST /home, 서버가 거절하면 서버 문구를 보여 준다', async () => {
+  it('대기 위치로 버튼이 켜져 있으면 POST /home, 서버가 거절하면 서버 문구를 보여 준다', async () => {
     const ok = capture('/api/robots/robot_01/home')
     const { card, socket } = await openPage({ controls: controls({ home: true }) })
     const user = userEvent.setup()
-    await user.click(within(card).getByRole('button', { name: /홈/ }))
+    await user.click(within(card).getByRole('button', { name: /대기 위치로/ }))
     await waitFor(() => expect(ok).toHaveLength(1))
 
     server.use(http.post('/api/robots/robot_01/home', () => HttpResponse.json({ code: 'NOT_LOCALIZED', message: '로봇이 자기 위치를 아직 모릅니다. 먼저 리셋해서 위치를 잡아 주세요.' }, { status: 409 })))
     act(() => socket().message(event({ controls: controls({ home: true }) })))
-    await user.click(within(card).getByRole('button', { name: /홈/ }))
+    await user.click(within(card).getByRole('button', { name: /대기 위치로/ }))
     expect(await screen.findByText(/먼저 리셋해서 위치를 잡아 주세요/)).toBeInTheDocument()
   })
 
@@ -124,7 +124,7 @@ describe('로봇 카드 버튼 (리셋 / 홈 / 지도 다시 읽기)', () => {
     const { card, socket } = await openPage({ controls: controls({ home: true, reload_map: true }), map_current: false })
     act(() => socket().serverClose(1006))
     await screen.findByText(/실시간 연결이 끊겼습니다/)
-    for (const name of ['리셋', /홈/, '지도 다시 읽기']) expect(within(card).getByRole('button', { name })).toBeDisabled()
+    for (const name of ['리셋', /대기 위치로/, '지도 다시 읽기']) expect(within(card).getByRole('button', { name })).toBeDisabled()
   })
 
   it('controls 가 없는 서버(옛 버전)면 버튼 줄을 그리지 않는다', async () => {

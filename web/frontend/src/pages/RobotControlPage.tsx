@@ -64,7 +64,7 @@ export function RobotControlPage() {
   const onReset = (robotId: string, node: string) => {
     const name = robotDisplayName(robotId)
     if (!window.confirm(`${name}을(를) '${nodeLabel(node)}'에 직접 올려놓으셨나요?\n진행 중인 주문이 있으면 취소되고, 로봇은 그 위치에 있다고 믿게 됩니다.`)) return
-    void runAction(robotId, 'reset', () => resetRobot(robotId, node), `${name} 위치를 '${nodeLabel(node)}'로 리셋했습니다. 위치가 잡히면 홈 버튼을 쓸 수 있어요.`)
+    void runAction(robotId, 'reset', () => resetRobot(robotId, node), `${name} 위치를 '${nodeLabel(node)}'로 리셋했습니다. 위치가 잡히면 '대기 위치로' 버튼을 쓸 수 있어요.`)
   }
   const onHome = (robotId: string) => void runAction(robotId, 'home', () => sendRobotHome(robotId), `${robotDisplayName(robotId)}을(를) 대기 위치로 보냅니다.`)
   const onReloadMap = (robotId: string) => void runAction(robotId, 'reload', () => reloadRobotMap(robotId), `${robotDisplayName(robotId)}에 지도를 다시 읽도록 했습니다.`)
