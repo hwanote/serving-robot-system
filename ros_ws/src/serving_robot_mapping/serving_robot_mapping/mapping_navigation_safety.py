@@ -57,12 +57,15 @@ class MappingNavigationSafety:
         )
 
     @classmethod
-    def evaluate(cls, snapshot):
+    def evaluate(cls, snapshot, *, lidar_only=False):
         """Return (allowed, reason).
 
         Only the known AMCL-absent localization error is
         eligible for a tightly limited Mapping exception.
         """
+
+        if type(lidar_only) is not bool:
+            return False, "INVALID_MAPPING_PROFILE"
 
         if not snapshot.slam_active:
             return False, "SLAM_NOT_ACTIVE"
@@ -80,12 +83,16 @@ class MappingNavigationSafety:
                 snapshot.health_sim_age_s,
                 3.0,
             ),
-            (
-                "PERSON_LIMIT_STALE",
-                snapshot.person_limit_age_s,
-                2.0,
-            ),
         )
+
+        if not lidar_only:
+            freshness += (
+                (
+                    "PERSON_LIMIT_STALE",
+                    snapshot.person_limit_age_s,
+                    2.0,
+                ),
+            )
 
         for reason, age, maximum in freshness:
             if not cls._fresh(age, maximum):
@@ -120,18 +127,19 @@ class MappingNavigationSafety:
         if snapshot.obstacle_hold is not False:
             return False, "OBSTACLE_HOLD_NOT_CLEAR"
 
-        limit = snapshot.person_limit
+        if not lidar_only:
+            limit = snapshot.person_limit
 
-        if not isinstance(limit, dict):
-            return False, "PERSON_LIMIT_UNKNOWN"
+            if not isinstance(limit, dict):
+                return False, "PERSON_LIMIT_UNKNOWN"
 
-        if limit.get("silent") is not False:
-            return False, "PERSON_DETECTOR_SILENT"
+            if limit.get("silent") is not False:
+                return False, "PERSON_DETECTOR_SILENT"
 
-        # Conservative first-motion policy:
-        # SLOW or STOP requires a new safety decision.
-        if limit.get("state") != "NORMAL":
-            return False, "PERSON_LIMIT_NOT_NORMAL"
+            # Conservative first-motion policy:
+            # SLOW or STOP requires a new safety decision.
+            if limit.get("state") != "NORMAL":
+                return False, "PERSON_LIMIT_NOT_NORMAL"
 
         health = snapshot.health
 
@@ -149,7 +157,13 @@ class MappingNavigationSafety:
         if not isinstance(checks, dict):
             return False, "HEALTH_CHECKS_MISSING"
 
-        for name in ("scan", "odom", "detector"):
+        required_checks = (
+            ("scan", "odom")
+            if lidar_only
+            else ("scan", "odom", "detector")
+        )
+
+        for name in required_checks:
             if checks.get(name) != "ok":
                 return False, f"HEALTH_{name.upper()}_INVALID"
 

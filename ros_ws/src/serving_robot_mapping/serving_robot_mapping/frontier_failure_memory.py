@@ -126,6 +126,11 @@ class FrontierFailureMemory:
 
         return tuple(available)
 
+    def clear_on_map_change(self):
+        """Forget old planning failures only after a confirmed map revision."""
+        # R16_172_RELEASE_STABILITY
+        self._records.clear()
+
     @property
     def record_count(self):
         return len(self._records)

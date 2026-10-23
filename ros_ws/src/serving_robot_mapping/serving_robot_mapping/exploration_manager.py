@@ -61,6 +61,12 @@ from serving_robot_mapping.mapping_frontier_clearance import (
     FrontierClearanceGuard,
 )
 
+from serving_robot_mapping.frontier_marker_adapter import frontier_representatives
+from serving_robot_mapping.mapping_completion_verifier import verify_closed_free_region
+
+
+from serving_robot_mapping.mapping_path_risk import MappingPathRiskGuard
+
 class ExplorationManager(Node):
     """Manage the autonomous mapping process."""
 
@@ -406,6 +412,16 @@ class ExplorationManager(Node):
         self.navigation_rearm_pending = False
         self.visited_frontiers = []
 
+        self.declare_parameter("mapping.lidar_only", False)
+        self.mapping_lidar_only = self.get_parameter(
+            "mapping.lidar_only"
+        ).value
+
+        if type(self.mapping_lidar_only) is not bool:
+            raise ValueError(
+                "mapping.lidar_only must be boolean"
+            )
+
         self.navigation_monitor = None
         self.navigation_client = None
 
@@ -415,6 +431,7 @@ class ExplorationManager(Node):
                     self,
                     self.tf_buffer,
                     robot_id=self.robot_id,
+                    lidar_only=self.mapping_lidar_only,
                 )
             )
             self.navigation_client = FrontierNavigationClient(
@@ -582,19 +599,64 @@ class ExplorationManager(Node):
         if (
             not self.navigation_enabled
             or marker.action != marker.ADD
-            or marker.type != marker.SPHERE_LIST
+            or marker.type not in (marker.SPHERE_LIST, marker.POINTS)
             or marker.header.frame_id != "map"
         ):
             self.planner_client.update_candidates(marker)
             return
 
+        # R16_171B_ROTATE_FAILED_PATHS
+        # Remember the current Frontier marker. A rejected path
+        # may trigger a new candidate batch without a map change.
+        # R16_172_RELEASE_STABILITY: callback works with an
+        # Explorer fixture that has no freshness monitor. A real
+        # Explorer always supplies the monitor; absent revision is
+        # never treated as evidence that a map has changed.
+        revision = getattr(
+            getattr(self, "freshness_monitor", None),
+            "map_revision", None
+        )
+        if revision != getattr(
+            self, "_r16_171b_revision", object()
+        ):
+            self._r16_171b_revision = revision
+            self._r16_171b_rejected = set()
+            self._r16_171b_refresh_pending = False
+
+        self._r16_171b_marker = marker
+
         groups = []
 
-        for point in marker.points[:10]:
+        if marker.type == marker.POINTS:
+            # Frontier Visualizer publishes ALL frontier cells
+            # as POINTS, not SPHERE_LIST cluster centroids.
+            grid = self.frontier_clearance_guard.grid
+
+            if grid is None:
+                frontier_xy = []
+            else:
+                _, _, _, res, ox, oy, yaw = grid
+
+                frontier_xy = frontier_representatives(
+                    marker.points,
+                    resolution=res,
+                    origin_x=ox,
+                    origin_y=oy,
+                    origin_yaw=yaw,
+                    limit=10,
+                )
+        else:
+            # Preserve legacy SPHERE_LIST compatibility.
+            frontier_xy = [
+                (point.x, point.y)
+                for point in marker.points[:10]
+            ]
+
+        for x, y in frontier_xy:
             groups.append(
                 self.frontier_clearance_guard.observation_candidates(
-                    point.x,
-                    point.y,
+                    x,
+                    y,
                     max_results=2,
                 )
             )
@@ -602,7 +664,11 @@ class ExplorationManager(Node):
         # Round-robin selection prevents one Frontier cluster
         # from monopolizing Nav2's 10-candidate planning budget.
         selected = []
-        seen = set()
+        # Rejected actual Nav2 paths must not be retried
+        # on an unchanged map revision.
+        seen = set(getattr(
+            self, "_r16_171b_rejected", ()
+        ))
 
         for alternative_index in range(2):
             for group in groups:
@@ -615,6 +681,16 @@ class ExplorationManager(Node):
                 if key in seen:
                     continue
 
+                # Exclude reached viewpoints BEFORE Nav2 planning.
+                # Do not reduce obstacle clearance or claim completion.
+                if any(
+                    math.hypot(x - vx, y - vy) <= 0.25
+                    for vx, vy in getattr(
+                        self, "visited_frontiers", ()
+                    )
+                ):
+                    continue
+
                 seen.add(key)
                 selected.append((x, y))
 
@@ -624,9 +700,225 @@ class ExplorationManager(Node):
             if len(selected) >= 10:
                 break
 
+        # The initial search samples only 10 representative
+        # Frontier positions. If all are exhausted, search
+        # additional regions before declaring exploration blocked.
+        # R16_171C_FILL_PARTIAL_FRONTIER_BATCH
+        # Once previous paths have been rejected, refill a
+        # partial batch from additional Frontier regions.
+        # Every result still requires Nav2 validation and
+        # the unchanged Mapping path and live safety gates.
+        if (
+            (
+                not selected
+                or (
+                    len(selected) < 10
+                    and bool(getattr(
+                        self, "_r16_171b_rejected", ()
+                    ))
+                )
+            )
+            and marker.type == marker.POINTS
+            and grid is not None
+            and marker.points
+        ):
+            expanded_frontiers = frontier_representatives(
+                marker.points,
+                resolution=res,
+                origin_x=ox,
+                origin_y=oy,
+                origin_yaw=yaw,
+                limit=64,
+            )
+
+            examined = 0
+
+            for fx, fy in expanded_frontiers:
+                examined += 1
+
+                alternatives = (
+                    self.frontier_clearance_guard
+                    .observation_candidates(
+                        fx,
+                        fy,
+                        max_results=4,
+                    )
+                )
+
+                for x, y in alternatives:
+                    key = (round(x, 2), round(y, 2))
+
+                    if key in seen:
+                        continue
+
+                    if any(
+                        math.hypot(x - vx, y - vy) <= 0.25
+                        for vx, vy in getattr(
+                            self, "visited_frontiers", ()
+                        )
+                    ):
+                        continue
+
+                    seen.add(key)
+                    selected.append((x, y))
+
+                    if len(selected) >= 10:
+                        break
+
+                if len(selected) >= 10:
+                    break
+
+            if selected:
+                expanded_signature = (
+                    examined,
+                    tuple(
+                        (round(x, 2), round(y, 2))
+                        for x, y in selected
+                    ),
+                )
+
+                if expanded_signature != getattr(
+                    self, "_last_expanded_frontier_log", None
+                ):
+                    self._last_expanded_frontier_log = (
+                        expanded_signature
+                    )
+                    self.get_logger().info(
+                        "Expanded Frontier search found "
+                        f"{len(selected)} unvisited safe viewpoints "
+                        f"from {examined} examined representatives."
+                    )
+
+        # Whole-free-region visibility fallback:
+        # only used when normal and expanded Frontier selection
+        # found no unvisited clearance-qualified viewpoint.
+        #
+        # Keep valid cached viewpoints between marker updates.
+        # Recheck both clearance and visited history on every use.
+        # Expensive visibility scans are rate limited.
+        if (
+            not selected
+            and marker.type == marker.POINTS
+            and grid is not None
+            and marker.points
+        ):
+            now = time.monotonic()
+            visited = getattr(self, "visited_frontiers", ())
+
+            for vx, vy in getattr(
+                self, "_visibility_fallback_cache", ()
+            ):
+                if (round(vx, 2), round(vy, 2)) in seen:
+                    continue
+
+                if any(
+                    math.hypot(vx - px, vy - py) <= 0.25
+                    for px, py in visited
+                ):
+                    continue
+
+                if not self.frontier_clearance_guard.goal_clear(
+                    vx, vy
+                )[0]:
+                    continue
+
+                selected.append((vx, vy))
+
+                if len(selected) >= 8:
+                    break
+
+            if (
+                not selected
+                and now >= getattr(
+                    self, "_visibility_fallback_retry_after",
+                    0.0,
+                )
+            ):
+                self._visibility_fallback_retry_after = (
+                    now + 15.0
+                )
+                self._visibility_fallback_cache = ()
+
+                try:
+                    from serving_robot_mapping.mapping_visibility_fallback import (
+                        select_visibility_fallback,
+                    )
+
+                    tf = self.tf_buffer.lookup_transform(
+                        "map", "base_footprint", Time()
+                    )
+                    robot = tf.transform.translation
+
+                    # Do not rescan identical unsuccessful
+                    # conditions every 15 seconds.
+                    scan_key = (
+                        hash(grid),
+                        round(robot.x, 1),
+                        round(robot.y, 1),
+                        tuple(
+                            (round(vx, 2), round(vy, 2))
+                            for vx, vy in visited
+                        ),
+                    )
+
+                    if scan_key != getattr(
+                        self,
+                        "_visibility_fallback_last_scanned_context",
+                        None,
+                    ):
+                        fallback, metrics = select_visibility_fallback(
+                            grid=grid,
+                            robot_xy=(robot.x, robot.y),
+                            visited=visited,
+                            goal_clear=(
+                                self.frontier_clearance_guard.goal_clear
+                            ),
+                            max_results=8,
+                        )
+
+                        self._visibility_fallback_cache = (
+                            tuple(fallback)
+                        )
+                        selected.extend(
+                            (vx, vy)
+                            for vx, vy in fallback
+                            if (round(vx, 2), round(vy, 2))
+                            not in seen
+                        )
+
+                        self.get_logger().info(
+                            "Visibility fallback: "
+                            f"{len(fallback)} clearance-qualified "
+                            "viewpoints; "
+                            f"visible_boundary="
+                            f"{metrics['visible_boundary_cells']}, "
+                            f"qualified_candidates="
+                            f"{metrics['geometry_candidates']}, "
+                            f"guard_rejected="
+                            f"{metrics['guard_rejections']}, "
+                            f"visited_rejected="
+                            f"{metrics['visited_rejections']}, "
+                            f"scored_viewpoints="
+                            f"{metrics['scored_viewpoints']}, "
+                            f"viewpoint_stride="
+                        f"{metrics['viewpoint_stride_cells']}, "
+                        f"guard_reasons="
+                            f"{metrics['guard_rejection_reasons']}; "
+                            "Nav2 path and live safety still required."
+                        )
+
+                        self._visibility_fallback_last_scanned_context = scan_key
+
+                except Exception as exc:
+                    # Fail closed: no unverified navigation goal.
+                    self.get_logger().warn(
+                        "Visibility fallback unavailable: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
         forwarded = type(marker)()
         forwarded.header = marker.header
-        forwarded.type = marker.type
+        forwarded.type = marker.SPHERE_LIST
         forwarded.action = (
             marker.ADD if selected else marker.DELETE
         )
@@ -641,6 +933,65 @@ class ExplorationManager(Node):
                 point.y = float(y)
                 point.z = 0.0
                 forwarded.points.append(point)
+
+        # New unvisited candidates must release any old
+        # visited-only planning hold, even on the same map revision.
+        if selected:
+            signature = tuple(
+                (round(x, 3), round(y, 3))
+                for x, y in selected
+            )
+            if signature != getattr(
+                self.planner_client, "signature", None
+            ):
+                self._visited_only_hold_revision = None
+
+        # A lack of safe viewpoints is not proof of map completion.
+        # Debounce temporary empty candidate sets before pausing.
+        state_machine = getattr(self, "state_machine", None)
+        current_state = getattr(state_machine, "state", None)
+
+        if selected:
+            self._no_viable_since = None
+
+            if current_state == MappingState.EXPLORATION_BLOCKED:
+                state_machine.transition_to(MappingState.EXPLORING)
+                self.get_logger().info(
+                    "New reachable Frontier candidate detected; "
+                    "EXPLORATION_BLOCKED -> EXPLORING"
+                )
+
+        elif (
+            marker.points
+            and getattr(
+                self.frontier_clearance_guard, "grid", None
+            ) is not None
+            and getattr(self, "last_frontier_count", 0) > 0
+            and current_state == MappingState.EXPLORING
+        ):
+            now = time.monotonic()
+            since = getattr(self, "_no_viable_since", None)
+
+            if since is None or now < since:
+                self._no_viable_since = now
+
+            elif now - since >= 10.0:
+                reason = (
+                    "VISITED_VIEWPOINTS_ONLY"
+                    if any(groups)
+                    else "NO_CLEARANCE_QUALIFIED_VIEWPOINT"
+                )
+
+                state_machine.transition_to(
+                    MappingState.EXPLORATION_BLOCKED
+                )
+
+                self.get_logger().warn(
+                    "EXPLORATION_BLOCKED: "
+                    f"{reason}; no Nav2 goal dispatched. "
+                    "Waiting for new reachable Frontier. "
+                    "MAP_COMPLETE not asserted."
+                )
 
         self.planner_client.update_candidates(forwarded)
 
@@ -721,6 +1072,25 @@ class ExplorationManager(Node):
             )
         ]
 
+        # Do not repeatedly replan only previously visited goals.
+        # This is a planning hold, NOT proof of map completion.
+        if verified_goals and not eligible:
+            revision = getattr(
+                getattr(self, "freshness_monitor", None),
+                "map_revision", None
+            )
+            if revision is not None:
+                self._visited_only_hold_revision = revision
+                self.get_logger().warn(
+                    "Only visited Frontier goals remain; "
+                    f"holding until map revision changes ({revision}). "
+                    "MAP_COMPLETE not asserted."
+                )
+            return
+
+        if eligible:
+            self._visited_only_hold_revision = None
+
         if (
             self.navigation_enabled
             and getattr(self, "_mapping_guard_required", False)
@@ -750,6 +1120,65 @@ class ExplorationManager(Node):
                     "no Nav2 goal dispatched."
                 )
                 return
+
+        # R16_170B_ACTUAL_PLANNER_PATH_SCREEN
+        # Screen the ACTUAL planner polyline against the freshest Mapping grid.
+        # Missing path geometry or a missing map fails closed. This gate never
+        # replaces the live LiDAR, Collision Monitor, or Soft Stop limiter.
+        if (
+            self.navigation_enabled
+            and getattr(self, "_mapping_guard_required", False)
+            and eligible
+        ):
+            path_guard = MappingPathRiskGuard(occupied_clearance_m=0.48)
+            grid = self.frontier_clearance_guard.grid
+            grid_ready = grid is not None and path_guard.update_grid(*grid)
+            path_approved = []
+            # R16_172_RELEASE_STABILITY
+            # Even when another candidate is approved, do not forget
+            # the known-unsafe actual paths within the same revision.
+            rejected = set(getattr(self, "_r16_171b_rejected", ()))
+            for candidate in eligible:
+                result = path_guard.check_path(
+                    getattr(candidate, "path_points", None)
+                    if grid_ready else None
+                )
+                if result.allowed:
+                    path_approved.append(candidate)
+                else:
+                    rejected.add((round(candidate.x, 2), round(candidate.y, 2)))
+                    self.get_logger().warn(
+                        "Frontier rejected by Mapping path screen: "
+                        f"({candidate.x:.2f}, {candidate.y:.2f}) "
+                        f"{result.reason}; samples={result.samples}"
+                    )
+            self._r16_171b_rejected = rejected
+            if not path_approved:
+                # R16_171B_ROTATE_FAILED_PATHS
+                # Record only goals whose actual Planner paths
+                # failed the unchanged Mapping safety screen.
+                rejected = getattr(
+                    self, "_r16_171b_rejected", set()
+                )
+                rejected.update(
+                    (round(goal.x, 2), round(goal.y, 2))
+                    for goal in eligible
+                )
+                self._r16_171b_rejected = rejected
+
+                # Defer marker reprocessing to the planning
+                # timer, outside this Action result callback.
+                self._r16_171b_refresh_pending = True
+
+                self.get_logger().warn(
+                    "No path-screen-qualified Frontier; "
+                    "no Nav2 goal dispatched. MAP_COMPLETE not asserted. "
+                    f"Excluded viewpoints={len(rejected)}; "
+                    "trying unused Frontier viewpoints."
+                )
+                return
+
+            eligible = path_approved
 
         selected = self.goal_manager.select_goal(eligible)
         if selected is None:
@@ -823,6 +1252,132 @@ class ExplorationManager(Node):
         if not self.last_frontier_count:
             return
 
+        # R16_171B_ROTATE_FAILED_PATHS
+        # Never dispatch a rejected path. Refresh candidate
+        # selection only after the Planner callback finishes.
+        if getattr(
+            self, "_r16_171b_refresh_pending", False
+        ):
+            self._r16_171b_refresh_pending = False
+            marker = getattr(
+                self, "_r16_171b_marker", None
+            )
+            if marker is not None:
+                self.mapping_update_candidates(marker)
+            return
+
+        # R16_171C_EXHAUSTED_PLANNER_ROTATION
+        # A planner-validation failure is not a safe path.
+        # Once the existing retry budget is exhausted,
+        # exclude that unchanged candidate batch and
+        # search unused Frontier viewpoints instead.
+        policy = getattr(
+            self.planner_client, "replanning_policy", None
+        )
+        candidates = tuple(getattr(
+            self.planner_client, "candidates", ()
+        ))
+        signature = getattr(
+            self.planner_client, "signature", None
+        )
+        max_failures = getattr(
+            policy, "max_failures", None
+        )
+        failures = getattr(
+            policy, "consecutive_failures", None
+        )
+        current_revision = getattr(
+            self.freshness_monitor, "map_revision", None
+        )
+
+        # R16_172_RELEASE_STABILITY
+        # Individual NO_VALID_PATH/mismatch failures may exhaust
+        # the failure-memory list before policy retries are exhausted.
+        memory = getattr(self.planner_client, "failure_memory", None)
+        memory_exhausted = (
+            memory is not None
+            and bool(candidates)
+            and hasattr(memory, "available_candidates")
+            and not memory.available_candidates(candidates)
+        )
+
+        exhausted = (
+            not getattr(self.planner_client, "busy", False)
+            and bool(candidates)
+            and signature is not None
+            and getattr(policy, "goal_key", None) == signature
+            and getattr(
+                self.planner_client,
+                "completed_signature",
+                None,
+            ) == signature
+            and type(max_failures) is int
+            and max_failures > 0
+            and type(failures) is int
+            and (failures >= max_failures or memory_exhausted)
+            and current_revision is not None
+            and current_revision == getattr(
+                self, "_r16_171b_revision", None
+            )
+        )
+
+        if exhausted:
+            marker = getattr(
+                self, "_r16_171b_marker", None
+            )
+            if marker is not None:
+                rejected = set(getattr(
+                    self, "_r16_171b_rejected", ()
+                ))
+                rejected.update(
+                    (round(x, 2), round(y, 2))
+                    for x, y in candidates
+                )
+                self._r16_171b_rejected = rejected
+
+                self.get_logger().warn(
+                    "Planner retry budget exhausted; "
+                    f"rotating {len(candidates)} "
+                    "unverified viewpoints; "
+                    f"excluded_total={len(rejected)}. "
+                    "MAP_COMPLETE not asserted."
+                )
+
+                # Only candidate generation is retried.
+                # No Nav2 motion is authorized here.
+                self.mapping_update_candidates(marker)
+                return
+
+        # Continue the existing 10-second no-viewpoint
+        # debounce even when the Frontier publisher is quiet.
+        if (
+            getattr(self, "_r16_171b_rejected", None)
+            and not getattr(
+                self.planner_client, "candidates", ()
+            )
+            and getattr(self, "_no_viable_since", None)
+            is not None
+        ):
+            marker = getattr(
+                self, "_r16_171b_marker", None
+            )
+            if marker is not None:
+                self.mapping_update_candidates(marker)
+            return
+
+        held_revision = getattr(
+            self, "_visited_only_hold_revision", None
+        )
+        current_revision = getattr(
+            getattr(self, "freshness_monitor", None),
+            "map_revision", None
+        )
+        if (
+            held_revision is not None
+            and held_revision == current_revision
+        ):
+            return
+
         if (
             self.navigation_enabled
             and self.navigation_max_goals > 0
@@ -847,6 +1402,34 @@ class ExplorationManager(Node):
             self.navigation_enabled
             and not self.navigation_monitor.is_safe()
         ):
+            result = getattr(
+                self.navigation_monitor,
+                "last_result",
+                (False, "UNKNOWN"),
+            )
+            reason = (
+                str(result[1])
+                if isinstance(result, tuple) and len(result) >= 2
+                else "UNKNOWN"
+            )
+
+            now = time.monotonic()
+            previous_reason = getattr(
+                self, "_last_planning_block_reason", None
+            )
+            previous_time = getattr(
+                self, "_last_planning_block_time", float("-inf")
+            )
+
+            if (
+                reason != previous_reason
+                or now - previous_time >= 10.0
+            ):
+                self.get_logger().warn(
+                    f"Mapping planning safety BLOCKED: {reason}"
+                )
+                self._last_planning_block_reason = reason
+                self._last_planning_block_time = now
             return
 
         self.planner_client.tick()
@@ -901,7 +1484,14 @@ class ExplorationManager(Node):
             "HEALTH_STALE",
             "HEALTH_SIM_STALE",
             "PERSON_LIMIT_STALE",
+            # A temporary SLOW/STOP person limit requires
+            # a completed, acknowledged Nav2 cancellation.
+            # Recovery still waits for continuous NORMAL
+            # safety evidence; this does not permit motion
+            # while a person limit is active.
+            "PERSON_LIMIT_NOT_NORMAL",
             "TF_NOT_STABLE",
+            "OBSTACLE_HOLD_NOT_CLEAR",
             "MAP_ODOM_TF_STALE",
             "ODOM_BASE_TF_STALE",
             "SLAM_NOT_ACTIVE",
@@ -1090,6 +1680,7 @@ class ExplorationManager(Node):
 
         if self.state_machine.state not in (
             MappingState.EXPLORING,
+            MappingState.EXPLORATION_BLOCKED,
             MappingState.COMPLETION_CHECK,
         ):
             return
@@ -1258,6 +1849,7 @@ class ExplorationManager(Node):
 
         if state not in (
             MappingState.EXPLORING,
+            MappingState.EXPLORATION_BLOCKED,
             MappingState.COMPLETION_CHECK,
         ):
             return
@@ -1292,6 +1884,21 @@ class ExplorationManager(Node):
             self.pending_goal = None
             self.planner_verified_goal = None
 
+            # A blocked explorer can re-enter normal zero-frontier
+            # completion checking when the frontier count vanishes.
+            if (
+                self.state_machine.state
+                == MappingState.EXPLORATION_BLOCKED
+            ):
+                self.state_machine.transition_to(
+                    MappingState.EXPLORING
+                )
+                self._no_viable_since = None
+                self.get_logger().info(
+                    "Frontiers disappeared; resuming "
+                    "independent completion checking."
+                )
+
         previous_state = self.state_machine.state
 
         current_state = self.goal_manager.observe_frontiers(
@@ -1312,6 +1919,30 @@ class ExplorationManager(Node):
                 f"State: {previous_state.value} "
                 f"-> {current_state.value}"
             )
+
+        if current_state == MappingState.COMPLETION_CHECK:
+            verified, reason = verify_closed_free_region(
+                data=msg.data,
+                width=width,
+                height=height,
+                resolution=resolution,
+                free_threshold=self.frontier_detector.free_threshold,
+                min_free_area_m2=10.0,
+            )
+
+            if self.goal_manager.confirm_map_complete(verified):
+                self.get_logger().info(
+                    "MAP_COMPLETE: stable zero Frontiers and "
+                    "independent closed-free-region verification passed."
+                )
+            elif reason != getattr(
+                self, "_last_completion_block_reason", None
+            ):
+                self._last_completion_block_reason = reason
+                self.get_logger().warn(
+                    "Completion verification pending: "
+                    f"{reason}; MAP_COMPLETE not asserted."
+                )
 
         # No navigation command is issued here.
 

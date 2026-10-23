@@ -35,12 +35,17 @@ class MappingNavigationSafetyMonitor:
         node,
         tf_buffer,
         robot_id="robot_01",
+        lidar_only=False,
     ):
         if robot_id != "robot_01":
             raise ValueError(
                 "Mapping policy currently supports robot_01 only"
             )
 
+        if type(lidar_only) is not bool:
+            raise ValueError("lidar_only must be bool")
+
+        self.lidar_only = lidar_only
         self.node = node
         self.tf_buffer = tf_buffer
         self.received = {}
@@ -104,13 +109,14 @@ class MappingNavigationSafetyMonitor:
             normal,
             lambda msg: json.loads(msg.data),
         )
-        self._watch(
-            String,
-            f"{root}/person_limit",
-            "person_limit",
-            normal,
-            lambda msg: json.loads(msg.data),
-        )
+        if not self.lidar_only:
+            self._watch(
+                String,
+                f"{root}/person_limit",
+                "person_limit",
+                normal,
+                lambda msg: json.loads(msg.data),
+            )
         self._watch(
             Bool,
             self.collision_topic,
@@ -422,7 +428,7 @@ class MappingNavigationSafetyMonitor:
 
         self.last_result = MappingNavigationSafety.evaluate(
             self.last_snapshot
-        )
+        , lidar_only=self.lidar_only)
 
         return self.last_result
 

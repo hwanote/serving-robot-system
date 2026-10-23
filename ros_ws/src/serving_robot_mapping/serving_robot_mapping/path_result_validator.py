@@ -156,6 +156,11 @@ class PathResultValidator:
             x=gx,
             y=gy,
             path_length_m=length,
+            # R16_170B_ACTUAL_PLANNER_PATH_SCREEN
+            path_points=tuple(
+                (pose.pose.position.x, pose.pose.position.y)
+                for pose in path.poses
+            ),
         )
 
         return PathValidationOutcome(

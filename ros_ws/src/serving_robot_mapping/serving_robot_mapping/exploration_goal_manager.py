@@ -20,6 +20,8 @@ class VerifiedFrontierGoal:
     x: float
     y: float
     path_length_m: float
+    # R16_170B_ACTUAL_PLANNER_PATH_SCREEN: validated Nav2 path, not a straight line.
+    path_points: tuple[tuple[float, float], ...] = ()
 
     def __post_init__(self) -> None:
         values = (

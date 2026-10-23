@@ -126,6 +126,18 @@ class ReplanningPolicy:
 
         # Do not reset failure budget for the same goal.
 
+    def map_changed(self, now_s: float) -> None:
+        """Allow fresh validation after real map content/geometry changes."""
+        # R16_172_RELEASE_STABILITY
+        self._check_time(now_s)
+        if self.goal_key is None:
+            return
+        self.pending = True
+        self.in_flight = False
+        self.consecutive_failures = 0
+        self.retry_after_s = None
+        self.last_change_s = now_s
+
     def request_recheck(self, now_s: float) -> None:
         """Recheck an expired result without extra map settling."""
 

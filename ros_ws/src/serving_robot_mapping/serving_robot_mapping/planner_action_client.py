@@ -270,15 +270,19 @@ class FrontierPlanningClient:
                 self.last_seen_map_revision = revision
 
             elif revision != self.last_seen_map_revision:
+                # R16_172_RELEASE_STABILITY
+                # A real map revision may open a previously blocked path.
+                # Do not clear this memory for TF failures, timers or
+                # identical repeated /map messages.
                 self.last_seen_map_revision = revision
+                self.failure_memory.clear_on_map_change()
 
                 if self.busy or self.approved_snapshot is not None:
                     self.invalidate_context("Map changed")
+                    self.replanning_policy.map_changed(time.monotonic())
                     return
 
-                self.replanning_policy.context_changed(
-                    time.monotonic()
-                )
+                self.replanning_policy.map_changed(time.monotonic())
 
         if self.busy and self.freshness_monitor is not None:
             valid, reason = self.context_status(
@@ -312,11 +316,15 @@ class FrontierPlanningClient:
 
         if not eligible_candidates:
             if self.completed_signature != self.signature:
+                # R16_172_RELEASE_STABILITY
+                # Report exhaustion once; the Explorer can rotate the
+                # whole failed batch without relaxing any validator.
                 self.node.get_logger().warn(
                     "All frontier candidates blocked "
                     "by failure memory."
                 )
                 self.completed_signature = self.signature
+                self.on_verified([])
             return
 
         if self.replanning_policy is not None:
@@ -588,32 +596,24 @@ class FrontierPlanningClient:
                     f"{outcome.reason}"
                 )
 
-                if (
-                    response.status == GoalStatus.STATUS_ABORTED
-                    and response.result.error_code
-                    == ComputePathToPose.Result.NO_VALID_PATH
-                ):
-                    x = requested_pose.pose.position.x
-                    y = requested_pose.pose.position.y
-
-                    failures = (
-                        self.failure_memory.record_failure(
-                            x, y
-                        )
-                    )
-
+                # R16_172_RELEASE_STABILITY
+                # Preserve fail-closed validation: endpoint mismatch,
+                # malformed result, and NO_VALID_PATH all disqualify
+                # this candidate for the current map. No invalid path
+                # is ever promoted to navigation.
+                x = requested_pose.pose.position.x
+                y = requested_pose.pose.position.y
+                failures = self.failure_memory.record_failure(x, y)
+                self.node.get_logger().warn(
+                    "Frontier planning failure: "
+                    f"({x:.2f}, {y:.2f}), "
+                    f"count={failures}/{self.failure_memory.max_failures}"
+                )
+                if self.failure_memory.is_blocked(x, y):
                     self.node.get_logger().warn(
-                        "Frontier planning failure: "
-                        f"({x:.2f}, {y:.2f}), "
-                        f"count={failures}/"
-                        f"{self.failure_memory.max_failures}"
+                        "Frontier candidate excluded after "
+                        "repeated invalid planner results."
                     )
-
-                    if self.failure_memory.is_blocked(x, y):
-                        self.node.get_logger().warn(
-                            "Frontier area blocked after "
-                            "repeated NO_VALID_PATH results."
-                        )
 
         except Exception as exc:
             self.node.get_logger().error(
