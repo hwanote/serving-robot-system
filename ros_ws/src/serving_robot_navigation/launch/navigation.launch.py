@@ -69,6 +69,15 @@ def _nav2_nodes(context, *args, **kwargs):
 
     sim = {'use_sim_time': use_sim_time}
 
+    controller_overrides = {
+        'FollowPath.desired_linear_vel': max_lin,
+        'FollowPath.max_angular_accel': ang_acc,
+    }
+    if LaunchConfiguration('free_goal_yaw').perform(context).lower() == 'true':
+        # mapping: the goal direction means nothing, so do not turn to it
+        controller_overrides['FollowPath.rotate_to_goal_heading'] = False
+        controller_overrides['general_goal_checker.yaw_goal_tolerance'] = 3.14
+
     controller = Node(
         package='nav2_controller',
         executable='controller_server',
@@ -77,10 +86,7 @@ def _nav2_nodes(context, *args, **kwargs):
         parameters=[
             params_file,
             sim,
-            {
-                'FollowPath.desired_linear_vel': max_lin,
-                'FollowPath.max_angular_accel': ang_acc,
-            },
+            controller_overrides,
         ],
         remappings=[('cmd_vel', 'cmd_vel_nav')],
     )
@@ -154,6 +160,16 @@ def generate_launch_description():
             description='Start person_detector + person_state + person_speed_limiter (camera + '
                         'YOLO + LiDAR state limits the speed). false = leave out'),
         DeclareLaunchArgument(
+            'hold_recovery', default_value='false',
+            description='Start hold_recovery: after 5 s in an obstacle hold with no goal '
+                        'active the robot turns in place to a clear heading (mapping '
+                        'mode). false = leave out'),
+        DeclareLaunchArgument(
+            'free_goal_yaw', default_value='false',
+            description='true = arrive at the goal position without turning to the goal '
+                        'direction (mapping: every frontier goal has yaw 0). '
+                        'false = turn to the goal direction (delivery)'),
+        DeclareLaunchArgument(
             'use_sim_time', default_value='true',
             description='Use Gazebo simulation clock'),
         DeclareLaunchArgument(
@@ -222,6 +238,7 @@ def generate_launch_description():
         'collision_monitor_params_file':
             LaunchConfiguration('collision_monitor_params_file'),
         'cmd_vel_out': LaunchConfiguration('cmd_vel_out'),
+        'hold_recovery': LaunchConfiguration('hold_recovery'),
     })
     command = section('command', {
         'delivery_limit_s': LaunchConfiguration('delivery_limit_s'),

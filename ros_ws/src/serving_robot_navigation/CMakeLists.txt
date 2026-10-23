@@ -18,6 +18,7 @@ install(
     scripts/decision/robot_health.py
     scripts/motion/person_speed_limiter.py
     scripts/motion/soft_stop_limiter.py
+    scripts/motion/hold_recovery.py
     scripts/command/route_executor.py
     scripts/command/go_to.py
     scripts/command/serve.py

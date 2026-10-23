@@ -40,7 +40,7 @@ React 관리/조작 패널, Fleet(다중 로봇), 다른 팀원 노드가 **자�
 |---|---|---|
 | 감시 `monitoring` | `scan_filter.py`(지도 장애물 제거), `clearance.py`(앞쪽 여유 거리, 접촉 이름), `detector_watch.py`(감지기 생존 확인), `person_observation.py`(카메라 관측 JSON, 사람 거리) | `dynamic_scan_filter.py`, `person_detector.py` |
 | 판단 `decision` | `person_safety.py`(사람 상태 NORMAL/SLOW/STOP/SENSOR_STALE), `person_judge.py`(관측 → `person_detection` 메시지) | `person_state.py` |
-| 구동 `motion` | `person_limit.py`(사람 상태 → 속도 제한), `soft_stop.py`(부드러운 정지, 재출발 규칙) | `person_speed_limiter.py`, `soft_stop_limiter.py` |
+| 구동 `motion` | `person_limit.py`(사람 상태 → 속도 제한), `soft_stop.py`(부드러운 정지, 재출발 규칙), `hold_recovery.py`(맵핑 모드: 장애물 정지가 5 s 이어지면 제자리 회전으로 탈출) | `person_speed_limiter.py`, `soft_stop_limiter.py`, `hold_recovery.py`(`hold_recovery:=true` 일 때만. `cmd_vel_nav` 에 회전 명령만 냄) |
 | 제어 `command` | `mission.py`(임무 상태 기계: 대기 알람, 우회, 배달 시간) | `route_executor.py`, `go_to.py`, `serve.py` |
 | 공통 (루트) | `site_config.py`(목적지, 경로 그래프, 구역), `interfaces.py`(토픽/서비스 이름) | |
 

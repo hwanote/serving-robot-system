@@ -34,6 +34,8 @@
   <exec_depend>serving_robot_description</exec_depend>
   <exec_depend>serving_robot_gazebo</exec_depend>
   <exec_depend>serving_robot_navigation</exec_depend>
+  <exec_depend>serving_robot_mapping</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
   <exec_depend>serving_robot_perception</exec_depend>
 
   <export>
