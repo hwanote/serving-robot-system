@@ -17,7 +17,8 @@ class Site:
         with open(os.path.join(cfg, 'entities.yaml'), encoding='utf-8') as f:
             self.ent = yaml.safe_load(f)
         mdir = os.path.join(repo, 'maps', 'stores', store_id)
-        with open(os.path.join(mdir, 'map.yaml'), encoding='utf-8') as f:
+        self.map_yaml_path = os.path.join(mdir, 'map.yaml')
+        with open(self.map_yaml_path, encoding='utf-8') as f:
             self.map_yaml = yaml.safe_load(f)
         img = Image.open(os.path.join(mdir, self.map_yaml.get('image', 'map.pgm'))).convert('L')
         self.width, self.height = img.size
@@ -138,7 +139,17 @@ class Site:
                 etype, label, epose = 'robot_wait', '대기 위치 %d' % int(num), wpose
             else:
                 continue
-            entities.append({'id': pid, 'type': etype, 'label': label, 'pose': epose})
+            ent = {'id': pid, 'type': etype, 'label': label, 'pose': epose}
+            if etype == 'table':
+                # real values from entities.yaml (never a made-up default)
+                top = (tables.get(pid) or {}).get('top_size_m')
+                if top:
+                    ent['top_size_m'] = {'x': float(top['x']), 'y': float(top['y'])}
+                chairs = (tables.get(pid) or {}).get('chairs')
+                if chairs:
+                    ent['chairs'] = [{'dx': float(c['dx']), 'dy': float(c['dy']),
+                                      'size_m': float(c['size_m'])} for c in chairs]
+            entities.append(ent)
             waypoints.append({'id': 'wp_' + pid, 'entity_id': pid, 'pose': wpose})
         return {'store_id': self.store_id, 'map_revision': self.revision,
                 'entities': entities, 'waypoints': waypoints, 'zones': []}

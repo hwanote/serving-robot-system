@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .config import Settings
+from .config import Settings, default_data_dir
 from .events import EventHub
 from .fleet.manager import FleetManager
 from .fleet.robot import Robot
@@ -13,6 +13,7 @@ from .repository.sql import SqlRepository
 from .ros_adapter import make_adapter
 from .routers import debug, maps, robots, tasks, ws
 from .services.orders import OrderService
+from .semantics import SemanticStore
 from .site import Site
 
 
@@ -56,6 +57,9 @@ def create_app(settings=None, repo=None):
     app.state.settings, app.state.site, app.state.repo = settings, site, repo
     app.state.hub, app.state.fleet = hub, fleet
     app.state.orders = OrderService(fleet, site)
+    app.state.semantics = SemanticStore(site, settings.repo,
+                                        settings.data_dir or default_data_dir(),
+                                        settings.require_drive_test)
     for module in (maps, tasks, robots, debug, ws):
         app.include_router(module.router)
     return app

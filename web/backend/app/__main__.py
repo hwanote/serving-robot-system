@@ -37,6 +37,9 @@ def build_parser():
     a('--fake-wait', type=float, help='fake adapter load/handover wait s (2)')
     a('--fake-fail', help='fake adapter: this table fails with NO_ROUTE')
     a('--wall-clock', action='store_true', help='ros adapter: no use_sim_time')
+    a('--data-dir', help='where saved Semantic Maps and generated nodes go (web/backend/data)')
+    a('--require-drive-test', action='store_true',
+      help='applying a map setup needs a passed drive test (not wired yet: apply is refused)')
     return ap
 
 
@@ -54,7 +57,7 @@ def settings_from_args(a):
              'help_after_s': a.help_after_s, 'idle_home_s': a.idle_home_s,
              'offline_after_s': a.offline_after_s, 'offline_fail_s': a.offline_fail_s,
              'ack_timeout_s': a.ack_timeout_s, 'fake_speed': a.fake_speed,
-             'fake_wait': a.fake_wait, 'fake_fail': a.fake_fail}
+             'fake_wait': a.fake_wait, 'fake_fail': a.fake_fail, 'data_dir': a.data_dir}
     for k, v in plain.items():
         if v is not None:
             setattr(s, k, v)
@@ -70,6 +73,8 @@ def settings_from_args(a):
         s.serve_home = True
     if a.wall_clock:
         s.use_sim_time = False
+    if a.require_drive_test:
+        s.require_drive_test = True
     return apply_mode(s)
 
 

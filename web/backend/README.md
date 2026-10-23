@@ -9,6 +9,7 @@ FastAPI + SQLAlchemy(SQLite, URL만 바꾸면 PostgreSQL). API 는 `docs/API.md`
 - `app/fleet/` 대기열·우선순위, 구역(zone), 경로 겹침 검사, 주방 잠금, 유휴 홈 복귀, 하트비트, KPI
 - `app/ros_adapter/` 로봇별 어댑터 (`ros` 실제, `fake` 가짜). 팀 Fleet 모듈로 바꿀 때 여기만 교체
 - `app/repository/` 저장소 (`memory`, `sql`). 재시작 후에도 기록이 남음 (`data/backend.db`)
+- `app/semantics.py` 지도 설정(Semantic Map) 초안 저장과 자동 노드 적용 (`tools/site_builder` 사용, 결과는 `data/`)
 - `config/fleet.example.yaml` 로봇·구역·우선순위·시간 설정 예시
 
 ## 운영 모드 (`--mode`)

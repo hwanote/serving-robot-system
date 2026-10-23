@@ -56,6 +56,9 @@ class Settings:
     offline_after_s: float = 5.0       # no message this long -> robot OFFLINE
     offline_fail_s: float = 30.0       # offline this long with an order -> order FAILED
     ack_timeout_s: float = 10.0        # order sent but the robot never reports it -> FAILED
+    # map setup (saved Semantic Map, automatic nodes)
+    data_dir: str = ''                 # '' = web/backend/data
+    require_drive_test: bool = False   # apply needs a passed drive test (the tool is not wired yet)
     # fake adapter
     fake_speed: float = 1.0
     fake_wait: float = 2.0
@@ -64,9 +67,13 @@ class Settings:
     use_sim_time: bool = True
 
 
-def default_db_url():
+def default_data_dir():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))      # web/backend
-    data = os.path.join(here, 'data')
+    return os.path.join(here, 'data')
+
+
+def default_db_url():
+    data = default_data_dir()
     os.makedirs(data, exist_ok=True)
     return 'sqlite:///' + os.path.join(data, 'backend.db').replace(os.sep, '/')
 
