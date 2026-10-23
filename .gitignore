@@ -26,6 +26,3 @@ rosbag2_*/
 # Generated temporary maps
 ros_ws/src/serving_robot_navigation/maps/generated/*
 !ros_ws/src/serving_robot_navigation/maps/generated/.gitkeep
-
-# Local builds, model weights, runtime state and evidence
-/_local_only/
