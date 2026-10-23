@@ -1,0 +1,6 @@
+{
+  "ros_ws/src/serving_robot_gazebo/worlds/cafe.world.sdf": "28ff62c3e58e7c5c8bd681b59203ca10e629d051a4c0db5e81c3cb493229dd2e",
+  "maps/stores/demo_store/map.pgm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "maps/stores/demo_store/map.yaml": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "maps/stores/demo_store/map_meta.yaml": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
