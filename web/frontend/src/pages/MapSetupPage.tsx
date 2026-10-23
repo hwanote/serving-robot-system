@@ -5,6 +5,7 @@ import { EmptyState, ErrorState, InlineError, LoadingState } from '../components
 import { Badge } from '../components/common/StatusBadge'
 import { EditorToolbar } from '../components/map/EditorToolbar'
 import { Inspector } from '../components/map/Inspector'
+import { LivePanel } from '../components/map/LivePanel'
 import { MappingPanel } from '../components/map/MappingPanel'
 import { MapViewport, type MapPointerEvent } from '../components/map/MapViewport'
 import { ZONE_STYLE } from '../components/map/mapStyles'
@@ -310,6 +311,8 @@ export function MapSetupPage() {
               </div>
             </div>
           </section>
+
+          {map && <LivePanel storeId={state.doc.store_id} dirty={dirty} savedKey={semantics.data} />}
 
           <section className="card" aria-labelledby="inspector-title">
             <div className="card-header">

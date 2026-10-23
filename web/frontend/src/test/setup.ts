@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest'
 import { mockDb, resetMockDb } from '../mocks/db'
+import { resetLiveMapMock } from '../mocks/liveMapHandlers'
 import { server } from './server'
 
 // jsdom 에 없는 브라우저 API
@@ -18,6 +19,7 @@ vi.mock('../mocks/MockDevPanel', () => ({ default: () => null }))
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 beforeEach(() => {
   resetMockDb()
+  resetLiveMapMock()
   mockDb.latencyMs = 0
 })
 afterEach(() => {

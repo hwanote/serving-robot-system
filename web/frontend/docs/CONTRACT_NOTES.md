@@ -84,3 +84,6 @@ Contract 예시의 entity 는 `id/type/label` 만 있어 테이블 위치를 지
 - 인증/권한: 미구현 (범위 외).
 - 매핑 상태는 앱 로드 시와 이 UI 에서 명령 시에만 갱신 (다른 클라이언트에서 매핑을 시작하면 반영 안 됨).
   실시간 반영이 필요하면 WS `mapping_state` 이벤트 또는 polling 을 Backend 와 협의.
+
+## 3-2c. 지도 반영(promote)·백업 — 우리 Backend 전용 (2026-10-23)
+`GET .../semantics/status`, `POST .../semantics/apply`, `GET .../semantics/live`, `POST .../semantics/promote`, `GET .../semantics/backups`, `POST .../semantics/backups/{id}/restore`. 응답·거절 코드는 `web/backend/docs/API.md`. 백업 id 는 서버 시각 `YYYYMMDD-HHMMSS`(같은 초면 `-2`)이고, 화면에는 `created_at` 을 PC 시간대로 바꿔 보여 준다. Mock 은 `src/mocks/liveMapHandlers.ts`.

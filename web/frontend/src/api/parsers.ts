@@ -19,7 +19,7 @@ import {
   type Zone,
   type ZoneType,
 } from '../types/contracts'
-import type { Task, TaskStateEvent } from '../types/provisional'
+import type { LiveChangeResult, LiveStatus, MapBackup, SemanticStatus, Task, TaskStateEvent } from '../types/provisional'
 
 export class ContractError extends Error {
   constructor(message: string) {
@@ -182,4 +182,76 @@ export function parseStateEvent(raw: unknown): StateSocketEvent | null {
     }
   }
   return null
+}
+
+
+// ---------- 지도 반영 ----------
+
+function parseBackup(value: unknown, where = 'backup'): MapBackup {
+  const o = obj(value, where)
+  const kind = str(o.kind, `${where}.kind`)
+  if (kind !== 'promote' && kind !== 'before_restore') throw new ContractError(`${where}.kind 알 수 없는 값: ${kind}`)
+  let summary: MapBackup['summary'] = null
+  if (o.summary !== undefined && o.summary !== null) {
+    const s = obj(o.summary, `${where}.summary`)
+    summary = { nodes: num(s.nodes, `${where}.summary.nodes`), edges: num(s.edges, `${where}.summary.edges`), tables: num(s.tables, `${where}.summary.tables`) }
+  }
+  return { id: str(o.id, `${where}.id`), created_at: str(o.created_at, `${where}.created_at`), kind, note: typeof o.note === 'string' ? o.note : '', summary }
+}
+
+export function parseBackups(value: unknown): MapBackup[] {
+  return arr(value, 'backups').map((b, i) => parseBackup(b, `backups[${i}]`))
+}
+
+function parseLast(value: unknown): LiveStatus['last'] {
+  if (value === null || value === undefined) return null
+  const o = obj(value, 'live.last')
+  const kind = str(o.kind, 'live.last.kind')
+  if (kind !== 'promote' && kind !== 'restore') throw new ContractError(`live.last.kind 알 수 없는 값: ${kind}`)
+  return {
+    at: str(o.at, 'live.last.at'),
+    kind,
+    backup_id: str(o.backup_id, 'live.last.backup_id'),
+    note: typeof o.note === 'string' ? o.note : '',
+    needs_robot_restart: o.needs_robot_restart === true,
+  }
+}
+
+export function parseLiveStatus(value: unknown): LiveStatus {
+  const o = obj(value, 'live')
+  return { matches_applied: o.matches_applied === true, backup_count: num(o.backup_count ?? 0, 'live.backup_count'), last: parseLast(o.last) }
+}
+
+export function parseLiveChange(value: unknown): LiveChangeResult {
+  const o = obj(value, 'result')
+  const last = parseLast(o.live)
+  if (!last) throw new ContractError('result.live: 값이 없습니다.')
+  return { backup: parseBackup(o.backup, 'result.backup'), live: last }
+}
+
+export function parseSemanticStatus(value: unknown): SemanticStatus {
+  const o = obj(value, 'status')
+  let draft: SemanticStatus['draft'] = null
+  if (o.draft) {
+    const d = obj(o.draft, 'status.draft')
+    draft = {
+      saved_at: typeof d.saved_at === 'string' ? d.saved_at : '',
+      sha: str(d.sha, 'status.draft.sha'),
+      map_revision: typeof d.map_revision === 'number' ? d.map_revision : null,
+    }
+  }
+  let applied: SemanticStatus['applied'] = null
+  if (o.applied) {
+    const a = obj(o.applied, 'status.applied')
+    const sm = a.summary ? obj(a.summary, 'status.applied.summary') : {}
+    const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+    applied = {
+      applied_at: typeof a.applied_at === 'string' ? a.applied_at : '',
+      source_sha: typeof a.source_sha === 'string' ? a.source_sha : '',
+      summary: { OK: Number(sm.OK ?? 0), WARN: Number(sm.WARN ?? 0), FAIL: Number(sm.FAIL ?? 0) },
+      notes: strings(a.notes),
+      warnings: strings(a.warnings),
+    }
+  }
+  return { draft, applied, in_sync: o.in_sync === true }
 }

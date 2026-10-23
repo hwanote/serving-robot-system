@@ -11,6 +11,7 @@ import { checkRevision, hasErrors, toSemanticPayload, validateSemanticMap } from
 import mapPngDataUrl from './assets/demo_store_map.png?inline'
 import { commitMockDb, mockDb, nextTaskId, type FailureKey } from './db'
 import { buildRawMap, MOCK_STORE_ID } from './fixtures'
+import { liveMapHandlers } from './liveMapHandlers'
 import { cancelSimTask, enqueueTask } from './simulator'
 
 const api = (path: string) => `${API_BASE_URL}/api${path}`
@@ -85,6 +86,7 @@ function pngBytes(): Uint8Array<ArrayBuffer> {
 const FORBIDDEN_TASK_KEYS = ['x', 'y', 'pose', 'robot_id', 'position', 'goal']
 
 export const httpHandlers = [
+  ...liveMapHandlers,
   http.post(api('/mapping/start'), mappingHandler('start')),
   http.post(api('/mapping/stop'), mappingHandler('stop')),
   http.post(api('/mapping/save'), mappingHandler('save')),

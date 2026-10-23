@@ -43,3 +43,38 @@ export interface MappingStatus {
   /** 마지막으로 저장된 Raw Map revision. 없으면 null */
   last_saved_revision: number | null
 }
+
+// ---------- 지도 반영 (Backend semantics 적용 / config/common 반영 / 백업) ----------
+
+/** GET /api/stores/{id}/semantics/status */
+export interface SemanticStatus {
+  /** 저장해 둔 초안. 없으면 null */
+  draft: { saved_at: string; sha: string; map_revision: number | null } | null
+  /** 자동 노드 생성 결과. 없으면 null */
+  applied: { applied_at: string; source_sha: string; summary: { OK: number; WARN: number; FAIL: number }; notes: string[]; warnings: string[] } | null
+  /** 적용 결과가 지금 초안과 같은지 */
+  in_sync: boolean
+}
+
+/** GET /api/stores/{id}/semantics/live — 로봇이 읽는 지도(config/common) 상태 */
+export interface LiveStatus {
+  /** 적용 결과가 이미 로봇 지도와 같은지 */
+  matches_applied: boolean
+  backup_count: number
+  last: { at: string; kind: 'promote' | 'restore'; backup_id: string; note: string; needs_robot_restart: boolean } | null
+}
+
+/** 지도 백업 한 건 (id 는 날짜-시각: 20261023-153012) */
+export interface MapBackup {
+  id: string
+  created_at: string
+  kind: 'promote' | 'before_restore'
+  note: string
+  summary: { nodes: number; edges: number; tables: number } | null
+}
+
+/** POST promote / restore 응답 */
+export interface LiveChangeResult {
+  backup: MapBackup
+  live: NonNullable<LiveStatus['last']>
+}
