@@ -31,6 +31,11 @@ class Params:
         self.edge_fail_margin_m = 0.02
         self.edge_warn_margin_m = 0.10
         self.default_top_m = 0.80    # table top when the label has no size
+        # approach branch: a straight spur from the corridor node towards the table, ending at a
+        # dock node where the robot serves. The guest can reach the last bit, so no closer than needed.
+        self.approach = False         # OFF: designed and unit-tested, never run on a robot (see DECISIONS #98)
+        self.serve_gap_m = 0.30      # wanted robot front -> table top edge at the dock
+        self.min_branch_m = 0.30     # a shorter branch is not built (Nav2 arrives within 0.15 m)
         self.snap_max_m = 1.5        # a standby point further than this from a corridor
         self.pickup_search_m = 0.30  # how far from the click to look for the counter
         self.zone_pad_m = 0.70

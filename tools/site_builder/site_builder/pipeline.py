@@ -54,6 +54,7 @@ class Result:
         self.params = None
         self.labels = []
         self.adjust_info = None
+        self.approach = {}     # table label id -> what the approach branch step did
 
     def count(self, level):
         return (sum(1 for c in self.node_checks.values() if c['level'] == level)
@@ -188,6 +189,88 @@ def _stop_for_target(c, g, l, res, blocked_at):
     return {'node': nid}
 
 
+def _approach_extent(c, g, nid, yaw_deg, gap_goal, blocked_at):
+    """How far a straight branch can run from node `nid` along the (axis) heading `yaw_deg` so the
+    robot front ends `gap_goal` from the table. Returns (length_m, front_gap_now, reason or None)."""
+    par = c.par
+    x, y = g.nodes[nid]
+    yr = math.radians(yaw_deg)
+    dx, dy = round(math.cos(yr)), round(math.sin(yr))
+    gap_now = raycast(blocked_at, (x + par.front_m * dx, y + par.front_m * dy), yr)
+    if gap_now is None:
+        return 0.0, None, 'no table ahead'
+    t_max = gap_now - gap_goal
+    if t_max <= 0.0:
+        return 0.0, gap_now, 'already %.0f cm from the table' % (gap_now * 100)
+    # other corridors: the dock keeps the corridor half width from them (own edges excepted)
+    others = [(g.nodes[e['a']], g.nodes[e['b']]) for e in g.edges if nid not in (e['a'], e['b'])]
+    t, last_ok, why = 0.0, 0.0, None
+    while t < t_max - 1e-9:
+        t = min(t + 0.025, t_max)
+        px, py = x + dx * t, y + dy * t
+        if c.clr_at(px, py) < c.need - 0.02:
+            why = 'not enough room beside the branch (%.2f m)' % c.clr_at(px, py)
+            break
+        if any(math.hypot(px - sg.foot_on_segment((px, py), a, b)[0][0],
+                          py - sg.foot_on_segment((px, py), a, b)[0][1]) < c.need
+               for a, b in others):
+            why = 'another corridor is in the way'
+            break
+        last_ok = t
+    if why is None and c.clr_at(x + dx * last_ok, y + dy * last_ok) - par.corner_radius_m \
+            < par.turn_fail_margin_m:
+        return 0.0, gap_now, 'no room to turn at the end of the branch'
+    return last_ok, gap_now, why
+
+
+def _add_approach_branches(c, g, stops, res, blocked_at):
+    """For every table stop, a straight spur from the corridor node towards the table.
+    The robot turns at the corridor node, drives the spur, serves and turns round at the dock.
+    No branch when it would be shorter than min_branch_m: the guest reaches over."""
+    par = c.par
+    # the dock needs room to turn in place: at least corner radius + the WARN margin from the table
+    gap_goal = max(par.serve_gap_m, par.corner_radius_m + par.turn_warn_margin_m - par.front_m)
+    docks = {}
+    for l in c.labels:
+        if l['kind'] != 'table' or l['id'] not in stops:
+            continue
+        nid = stops[l['id']]['node']
+        x, y = g.nodes[nid]
+        info = {'node': nid, 'branch_m': 0.0, 'gap_goal_m': round(gap_goal, 3)}
+        res.approach[l['id']] = info
+        yaw = _snap_yaw(math.degrees(math.atan2(l['y'] - y, l['x'] - x)), par.yaw_snap_deg)
+        if yaw not in (-90.0, 0.0, 90.0, 180.0):
+            info['reason'] = 'the table is not straight ahead of the corridor node'
+            continue
+        length, gap_now, why = _approach_extent(c, g, nid, yaw, gap_goal, blocked_at)
+        info['gap_now_m'] = None if gap_now is None else round(gap_now, 3)
+        if length < par.min_branch_m:
+            info['reason'] = why or ('a branch would be only %.0f cm (under %.0f cm)'
+                                     % (length * 100, par.min_branch_m * 100))
+            continue
+        yr = math.radians(yaw)
+        dock = (x + round(math.cos(yr)) * length, y + round(math.sin(yr)) * length)
+        again = _snap_yaw(math.degrees(math.atan2(l['y'] - dock[1], l['x'] - dock[0])),
+                          par.yaw_snap_deg)
+        if again != yaw:
+            info['reason'] = 'the table would no longer be straight ahead at the dock'
+            continue
+        if any(math.hypot(dock[0] - v[0], dock[1] - v[1]) < par.node_reuse_m
+               for v in list(g.nodes.values()) + list(docks.values())):
+            info['reason'] = 'another node is already at the end of the branch'
+            continue
+        did = sg.new_node_id(g)
+        g.nodes[did] = dock
+        edge = {'id': '', 'a': nid, 'b': did, 'length_m': 0.0, 'angle_deg': 0.0,
+                'min_clearance_m': None, 'branch': True}
+        g.edges.append(edge)
+        sg.refresh_edge(g, edge, c.clr_at)
+        docks[l['id']] = dock
+        stops[l['id']] = {'node': did}
+        info.update({'node': did, 'from_node': nid, 'branch_m': round(length, 3),
+                     'gap_m': round(gap_now - length, 3)})
+
+
 def _incident_yaw(g, nid, par):
     best = None
     for e in g.edges:
@@ -261,6 +344,16 @@ def generate(map_yaml, labels_src, par=None, adjustments=None):
     for s in stops.values():
         s['node'] = ident[s['node']]
     res.adjust_info = None
+    if par.approach:
+        _add_approach_branches(c, g, stops, res, blocked_at)
+        if res.approach and any(v['branch_m'] for v in res.approach.values()):
+            ident = sg.renumber(g)
+            for s in stops.values():
+                s['node'] = ident[s['node']]
+            for v in res.approach.values():
+                for k in ('node', 'from_node'):
+                    if k in v:
+                        v[k] = ident[v[k]]
     if adjustments:
         from . import adjust as adj
         a = adj.load(adjustments)
@@ -419,6 +512,7 @@ def to_preview(res):
         'poses': {n: _round_all(p) for n, p in res.poses.items()},
         'zones': [{'id': z['id'], 'rect': _round_all(z['rect'])} for z in res.zones],
         'excluded': res.excluded, 'warnings': res.warnings, 'adjustments': res.adjust_info,
+        'approach': res.approach,
         'summary': {k: res.count(k) for k in ('OK', 'WARN', 'FAIL')},
     }
 
