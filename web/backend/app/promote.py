@@ -21,7 +21,7 @@ import time
 
 import yaml
 
-from .semantics import SemanticError, _atomic_json, _read_json
+from .semantics import SemanticError, _atomic_json, _read_json, digest, validate
 from .util import now_iso
 
 FILES = ('entities.yaml', 'waypoints.yaml', 'zones.yaml')
@@ -110,6 +110,15 @@ class LiveConfig:
     def _live_path(self):
         return os.path.join(self.data_dir, 'live', '%s.json' % self.site.store_id)
 
+    @property
+    def _live_sem_path(self):
+        # the saved draft that produced what is in config/common right now
+        return os.path.join(self.data_dir, 'live', '%s.semantics.json' % self.site.store_id)
+
+    @property
+    def _draft_path(self):
+        return os.path.join(self.data_dir, 'semantics', '%s.json' % self.site.store_id)
+
     # ---- what is live
     def revision(self):
         return live_revision(self.repo)
@@ -135,6 +144,7 @@ class LiveConfig:
             if not isinstance(meta, dict) or _dir_sha(folder) is None:
                 continue
             meta['summary'] = _summary(folder)
+            meta['has_semantics'] = os.path.isfile(os.path.join(folder, 'semantics.json'))
             out.append(meta)
         return out
 
@@ -174,6 +184,21 @@ class LiveConfig:
             raise SemanticError(422, 'MISSING_KITCHEN', '주방(%s) 위치가 없어요.' % self.fleet.kitchen)
 
     # ---- the swap
+    def _semantics_for_backup(self, kind):
+        """The editor's saved draft that goes with the map being backed up (None if unknown).
+        promote: the draft that produced the current config/common (only if config/common is
+        still exactly what it produced). before_restore: what the editor shows right now, so
+        undoing a restore brings the editor back too."""
+        if kind == 'before_restore':
+            saved = _read_json(self._draft_path)
+            doc = saved.get('semantics') if isinstance(saved, dict) else None
+            return doc if isinstance(doc, dict) else None
+        rec = _read_json(self._live_sem_path)
+        if isinstance(rec, dict) and isinstance(rec.get('semantics'), dict) \
+                and rec.get('common_sha') == _dir_sha(self.common):
+            return rec['semantics']
+        return None
+
     def _new_backup(self, kind, note, source_sha=None):
         stamp = time.strftime('%Y%m%d-%H%M%S')
         bid, n = stamp, 1
@@ -184,8 +209,12 @@ class LiveConfig:
         os.makedirs(folder)
         for name in FILES:
             shutil.copy2(os.path.join(self.common, name), os.path.join(folder, name))
+        doc = self._semantics_for_backup(kind)
+        if doc is not None:
+            _atomic_json(os.path.join(folder, 'semantics.json'), {'semantics': doc})
         meta = {'id': bid, 'created_at': now_iso(), 'kind': kind, 'note': note,
-                'sha': _dir_sha(folder), 'source_sha': source_sha}
+                'sha': _dir_sha(folder), 'source_sha': source_sha,
+                'has_semantics': doc is not None}
         _atomic_json(os.path.join(folder, 'meta.json'), meta)
         return meta
 
@@ -238,6 +267,8 @@ class LiveConfig:
             backup = self._new_backup('promote', '적용 결과를 반영하기 전 지도',
                                       source_sha=applied.get('source_sha'))
             self._install(self._gen_dir, os.path.join(self._backup_root, backup['id']))
+            _atomic_json(self._live_sem_path, {'common_sha': _dir_sha(self.common),
+                                               'semantics': draft.get('semantics')})
             return {'backup': backup,
                     'live': self._record('promote', backup, applied.get('source_sha'),
                                          '적용 결과를 로봇 지도로 반영')}
@@ -254,5 +285,22 @@ class LiveConfig:
                 raise SemanticError(409, 'ALREADY_LIVE', '이미 그 백업과 같은 지도예요.')
             before = self._new_backup('before_restore', '%s 백업으로 되돌리기 전 지도' % backup_id)
             self._install(folder, os.path.join(self._backup_root, before['id']))
+            doc, note = self._restore_draft(folder)
             return {'backup': before,
-                    'live': self._record('restore', before, None, '%s 백업으로 되돌림' % backup_id)}
+                    'live': self._record('restore', before, None, '%s 백업으로 되돌림' % backup_id),
+                    'semantics': doc, 'semantics_restored': doc is not None,
+                    'semantics_note': note}
+
+    def _restore_draft(self, folder):
+        """Bring the editor's saved draft back too. Returns (doc or None, why-not note)."""
+        saved = _read_json(os.path.join(folder, 'semantics.json'))
+        doc = saved.get('semantics') if isinstance(saved, dict) else None
+        if not isinstance(doc, dict):
+            return None, '이 백업에는 편집 화면 저장본이 없어서 로봇 지도만 되돌렸어요.'
+        try:
+            validate(doc, self.site.store_id, self.site.revision)
+        except SemanticError as e:
+            return None, '편집 화면 저장본이 지금 지도와 맞지 않아 로봇 지도만 되돌렸어요: %s' % e.message
+        _atomic_json(self._draft_path, {'saved_at': now_iso(), 'sha': digest(doc), 'semantics': doc})
+        _atomic_json(self._live_sem_path, {'common_sha': _dir_sha(self.common), 'semantics': doc})
+        return doc, None

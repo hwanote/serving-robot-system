@@ -50,8 +50,8 @@ Task 필드: `task_id type destination_id status robot_id created_at updated_at`
 | GET | `/api/stores/{id}/semantics/status` | `{draft, applied, in_sync, require_drive_test}`. `in_sync` 는 적용 결과가 지금 초안과 같은지 |
 | GET | `/api/stores/{id}/semantics/live` | 로봇이 읽는 지도(`config/common`) 상태: `{live_sha, matches_applied, last, backup_count}`. `last` = 마지막 반영/복구 기록 |
 | POST | `/api/stores/{id}/semantics/promote` | **적용 결과를 `config/common` 에 반영.** 먼저 지금 지도를 `data/backups/<store>/<YYYYMMDD-HHMMSS>/` 에 백업(여러 개 계속 보관). 응답 `{backup, live}`, `live.needs_robot_restart=true` — **로봇은 시작할 때와 `reload-map` 명령을 받을 때만 읽음 — 반영 뒤 로봇 카드의 "지도 다시 읽기"** |
-| GET | `/api/stores/{id}/semantics/backups` | 백업 목록(최신순): `{id, created_at, kind(promote/before_restore), note, summary{nodes,edges,tables}}` |
-| POST | `/api/stores/{id}/semantics/backups/{backup_id}/restore` | 그 백업으로 되돌림. 되돌리기 전 지도도 `before_restore` 백업으로 남아서 다시 취소 가능 |
+| GET | `/api/stores/{id}/semantics/backups` | 백업 목록(최신순): `{id, created_at, kind(promote/before_restore), note, has_semantics, summary{nodes,edges,tables}}` — `has_semantics`: 그 지도를 만든 편집 화면 저장본(draft)이 백업에 같이 있는지 |
+| POST | `/api/stores/{id}/semantics/backups/{backup_id}/restore` | 그 백업으로 되돌림. 되돌리기 전 지도도 `before_restore` 백업으로 남아서 다시 취소 가능. **편집 화면 저장본(draft)도 같이 되돌림** — 응답 `{backup, live, semantics, semantics_restored, semantics_note}`. 백업에 저장본이 없거나(옛 백업) 지금 지도 revision 과 안 맞으면 `semantics_restored=false`, 로봇 지도만 되돌리고 이유를 `semantics_note` 에 담음. 되돌린 뒤에는 "적용 결과"가 저장본보다 새것이라 `in_sync=false` (다시 적용해야 반영 가능) |
 
 반영·복구가 거절되면 (초안·적용 결과·`config/common` 은 그대로):
 | 상태 / code | 뜻 |

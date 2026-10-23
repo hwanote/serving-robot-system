@@ -162,3 +162,60 @@ def test_a_failure_while_switching_puts_the_old_map_back(client, base, monkeypat
     r = client.post(URL + '/promote')
     assert r.status_code == 500 and r.json()['code'] == 'PROMOTE_FAILED'
     assert tree_hash(live_dir(client)) == before
+
+
+def ids(doc):
+    return sorted(e['id'] for e in doc['entities'])
+
+
+def test_restore_brings_the_editor_draft_back_too(client, base):
+    apply(client, changed(base, 4))
+    first = client.post(URL + '/promote').json()['backup']
+    assert first['has_semantics'] is False            # the original map had no saved draft
+    apply(client, changed(base, 3))
+    second = client.post(URL + '/promote').json()['backup']
+    assert second['has_semantics'] is True            # = the draft that made table_04's map
+    # the editor now shows something newer than anything live
+    assert client.put(URL, json=base).status_code == 200
+    r = client.post('%s/backups/%s/restore' % (URL, second['id']))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body['semantics_restored'] is True and body['semantics_note'] is None
+    assert ids(body['semantics']) == ids(changed(base, 4))
+    assert ids(client.get(URL).json()) == ids(changed(base, 4))     # what the editor will load
+    # the draft is "not applied" now (the applied result is the newer one)
+    st = client.get(URL + '/status').json()
+    assert st['in_sync'] is False
+    # undo the restore: map and editor go back to what they were before it
+    undo = body['backup']
+    assert undo['has_semantics'] is True
+    r2 = client.post('%s/backups/%s/restore' % (URL, undo['id']))
+    assert r2.status_code == 200
+    assert ids(client.get(URL).json()) == ids(base)
+
+
+def test_restoring_an_old_backup_without_a_draft_only_changes_the_robot_map(client, base):
+    original = tree_hash(live_dir(client))
+    apply(client, changed(base, 4))
+    old = client.post(URL + '/promote').json()['backup']
+    assert old['has_semantics'] is False
+    drafted = client.get(URL).json()
+    r = client.post('%s/backups/%s/restore' % (URL, old['id']))
+    assert r.status_code == 200
+    body = r.json()
+    assert body['semantics_restored'] is False and body['semantics'] is None
+    assert '편집 화면 저장본이 없어' in body['semantics_note']
+    assert tree_hash(live_dir(client)) == original
+    assert client.get(URL).json() == drafted                 # the editor draft is left alone
+    listed = {b['id']: b['has_semantics'] for b in client.get(URL + '/backups').json()}
+    assert listed[old['id']] is False
+
+
+def test_a_hand_edited_common_is_not_paired_with_a_stale_draft(client, base):
+    apply(client, changed(base, 4))
+    client.post(URL + '/promote')
+    with open(os.path.join(live_dir(client), 'zones.yaml'), 'a', encoding='utf-8') as f:
+        f.write('\n# edited by hand\n')
+    apply(client, changed(base, 3))
+    second = client.post(URL + '/promote').json()['backup']
+    assert second['has_semantics'] is False                  # common no longer matches the draft
