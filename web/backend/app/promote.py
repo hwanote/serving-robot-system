@@ -7,8 +7,9 @@ Every replacement first copies the current config/common files to a new backup f
 data/backups/<store>/<YYYYMMDD-HHMMSS>/ (nothing is deleted), so any older map can be
 brought back, and a restore can itself be undone.
 
-The robots read config/common only when their nodes start, so the response always says
-that the robot nodes must be restarted. The backend's own Site and the fleet are
+The robots read config/common only when their nodes start or when they get the
+`reload_map` command (robot card button), so the response always says that they
+have to read it again. The backend's own Site and the fleet are
 refreshed here.
 """
 import hashlib
@@ -59,6 +60,34 @@ def _summary(folder):
             'tables': len(ent.get('tables') or {})}
 
 
+_REV_CACHE = {}
+
+
+def live_revision(repo):
+    """Short hash of config/common as the robots compute it (Site.revision), so it can be
+    compared with the `config_revision` a robot reports. None when it cannot be read."""
+    common = os.path.join(repo, 'config', 'common')
+    try:
+        key = tuple(os.stat(os.path.join(common, n)).st_mtime_ns for n in FILES)
+    except OSError:
+        return None
+    hit = _REV_CACHE.get(common)
+    if hit and hit[0] == key:
+        return hit[1]
+    nav = os.path.join(repo, 'ros_ws', 'src', 'serving_robot_navigation')
+    if not os.path.isdir(nav):
+        return None
+    if nav not in sys.path:
+        sys.path.insert(0, nav)
+    try:
+        from serving_robot_navigation.site_config import config_revision
+        rev = config_revision(common)
+    except Exception:
+        return None
+    _REV_CACHE[common] = (key, rev)
+    return rev
+
+
 class LiveConfig:
     def __init__(self, site, fleet, repo, data_dir):
         self.site, self.fleet, self.repo, self.data_dir = site, fleet, repo, data_dir
@@ -82,6 +111,9 @@ class LiveConfig:
         return os.path.join(self.data_dir, 'live', '%s.json' % self.site.store_id)
 
     # ---- what is live
+    def revision(self):
+        return live_revision(self.repo)
+
     def status(self):
         applied = _read_json(os.path.join(self._gen_dir, 'applied.json'))
         live_sha, gen_sha = _dir_sha(self.common), _dir_sha(self._gen_dir)
@@ -89,7 +121,7 @@ class LiveConfig:
                 'matches_applied': bool(live_sha and live_sha == gen_sha),
                 'applied_source_sha': (applied or {}).get('source_sha'),
                 'last': _read_json(self._live_path), 'backup_count': len(self.list_backups()),
-                'needs_robot_restart_note': '로봇 노드는 시작할 때만 지도를 읽어요. 반영 후 로봇을 다시 켜야 해요.'}
+                'needs_robot_restart_note': '로봇은 지도를 시작할 때와 "지도 다시 읽기" 명령을 받았을 때만 읽어요. 반영 후 로봇 관제 화면에서 눌러 주세요.'}
 
     def list_backups(self):
         out = []
@@ -125,7 +157,8 @@ class LiveConfig:
             from serving_robot_navigation.site_config import SiteConfigError, load_site
             try:
                 load_site(folder)
-            except SiteConfigError as e:
+            except (SiteConfigError, yaml.YAMLError, OSError, KeyError, TypeError,
+                    ValueError, AttributeError) as e:
                 raise SemanticError(422, 'ROBOT_LOADER_REJECTED',
                                     '로봇이 읽을 수 없는 지도예요: %s' % e)
         with open(os.path.join(folder, 'waypoints.yaml'), encoding='utf-8') as f:

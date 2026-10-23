@@ -23,6 +23,12 @@ class FakeAdapter:
         self.muted = False      # test hook: stop reporting (robot goes silent)
         self.deaf = False       # test hook: ignore commands (robot never acknowledges)
         self.received = []      # commands that reached the robot
+        self.localization = 'OK'     # test hook: 'LOST' etc.
+        self.config_revision = self._live_revision()   # the map it was started with
+
+    def _live_revision(self):
+        from ..promote import live_revision
+        return live_revision(self.site.repo) or ''
 
     def start(self, sink):
         self.sink, self.running = sink, True
@@ -65,7 +71,8 @@ class FakeAdapter:
         nxt, route = self._route()
         return {'state': self.state, 'mission_id': self.mission_id, 'destination': dest,
                 'serve': bool(self.table), 'table': self.table, 'result': self.result,
-                'code': self.code, 'leg': 1, 'legs': 1, 'localization': 'OK', 'loc_hold': '',
+                'code': self.code, 'leg': 1, 'legs': 1, 'localization': self.localization, 'loc_hold': '',
+                'config_revision': self.config_revision,
                 'returning': False, 'node': self.last_node, 'next_edge': nxt, 'route': route}
 
     def _handle(self, cmd):
@@ -92,6 +99,30 @@ class FakeAdapter:
             self.stages = [('DRIVING', n) for n in cmd.get('names', [])]
             self.stage, self.state = 0, 'DRIVING'
             self._enter_drive()
+        elif kind == 'reset':
+            node = cmd.get('node', '')
+            try:
+                x, y = self.site.node_xy(node)
+            except Exception:
+                self.sink.on_alarm(self.robot, {'code': 'BAD_COMMAND', 'level': 'warn',
+                                                'text': 'reset refused: %s' % node})
+                return
+            had = self.state != 'IDLE'
+            self.pos[0], self.pos[1] = x, y
+            self.last_node = self.site.nearest_node(x, y)
+            self.state, self.stages, self.wps = 'IDLE', [], []
+            self.localization = 'OK'
+            if had:
+                self.result, self.code = 'CANCELED', 'RESET'
+        elif kind == 'reload_map':
+            if self.state != 'IDLE':
+                self.sink.on_alarm(self.robot, {'code': 'MAP_RELOAD_REFUSED', 'level': 'warn',
+                                                'text': 'map not reloaded: the robot is not idle'})
+                return
+            self.config_revision = self._live_revision()
+            self.sink.on_alarm(self.robot, {'code': 'MAP_RELOADED', 'level': 'info',
+                                            'text': 'map reloaded',
+                                            'config_revision': self.config_revision})
         elif kind == 'cancel' and self.state != 'IDLE':
             self.state, self.result, self.stages, self.wps = 'IDLE', 'CANCELED', [], []
 

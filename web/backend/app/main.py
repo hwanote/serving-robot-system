@@ -62,6 +62,7 @@ def create_app(settings=None, repo=None):
                                         settings.data_dir or default_data_dir(),
                                         settings.require_drive_test)
     app.state.live = LiveConfig(site, fleet, settings.repo, settings.data_dir or default_data_dir())
+    fleet.live_revision = app.state.live.revision
     for module in (maps, tasks, robots, debug, ws):
         app.include_router(module.router)
     return app

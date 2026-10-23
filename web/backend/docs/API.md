@@ -16,13 +16,22 @@ Task 필드: `task_id type destination_id status robot_id created_at updated_at`
 ## 로봇·운영
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/robots` | 로봇별 상태 (`online`, `accepting_orders`, `mission_state`, `loc_hold`, `home`) |
+| GET | `/api/robots` | 로봇별 상태 (`online`, `accepting_orders`, `mission_state`, `loc_hold`, `home`, `localization`, `map_current`, `controls`) — 같은 필드가 WebSocket `robot_state` 에도 실려요 |
 | POST | `/api/robots/{id}/pause` · `/resume` | 새 주문만 받지 않음/다시 받음 (진행 중인 주문은 끝까지) |
 | POST | `/api/robots/{id}/recover` | 위치 복구 뒤 `{action:"resume"|"home"}`. 아니면 409 `NOT_RECOVERABLE` |
+| POST | `/api/robots/{id}/reset` | **비상 리셋**: 로봇을 사람이 `node` 위에 올려놓았다는 뜻. 본문 `{node?}` (기본: 그 로봇의 대기 위치). 진행 중이던 주문은 `CANCELED`(detail `RESET`). 404 `ROBOT_NOT_FOUND`, 400 `BAD_NODE`, 409 `ROBOT_OFFLINE` |
+| POST | `/api/robots/{id}/home` | **대기 위치로 보냄**. 쉬고 있고 위치가 `OK` 일 때만 (위치를 잃었으면 409 `NOT_LOCALIZED` → 먼저 리셋). 409 `ROBOT_BUSY`, `ALREADY_HOME`, `ROBOT_OFFLINE`. 위치를 잃었다가 복구된 직후에는 로봇의 `home` 선택으로 처리 |
+| POST | `/api/robots/{id}/reload-map` | 로봇이 `config/common` 을 **다시 읽음** (로봇 노드는 시작할 때만 읽으므로). 쉬고 있을 때만, 아니면 409 `ROBOT_BUSY`. 결과는 `map_current` 로 확인 |
+| POST | `/api/robots/reload-map` | 쉬고 있는 모든 로봇에 위 명령. `{robots:{id:"sent"|"current"|"busy"|"offline"}}` (이미 최신이면 `current`) |
 | POST | `/api/dispatch/pause` · `/resume` | 전체 배차 멈춤/재개 (주문은 접수되어 대기) |
 | GET | `/api/snapshot` | WebSocket 재연결 뒤 상태 맞추기용 (`robots`, `tasks`, `queue`) |
 | GET | `/api/metrics` | 건수·대기시간·소요시간·처리량·로봇별 완료 수 |
 | GET | `/api/debug` | 대기 이유, 로봇 원본 상태, 최근 로그 |
+
+`controls` (카드 버튼 규칙, 화면은 이 값만 따라요): `reset` 연결돼 있으면 true · `reset_nodes` 리셋 때 고를 수 있는 위치(대기 위치, 주방) ·
+`home` 위 규칙을 만족할 때 · `reload_map` 쉬고 있고 `map_current` 가 true 가 아닐 때.
+`map_current`: 로봇이 쓰는 지도가 지금 `config/common` 과 같은지 (`true`/`false`, 로봇 노드가 옛 버전이라 알려 주지 않으면 `null`).
+로봇이 보고하는 값은 `mission_status.config_revision` (= 세 yaml 파일의 짧은 해시)이에요.
 
 ## 지도 / 매핑 / WebSocket
 `/api/stores/{id}/map|map.png`, `/api/mapping/*`(아직 501), `WS /ws/state` — 임시 브리지와 동일.
@@ -40,7 +49,7 @@ Task 필드: `task_id type destination_id status robot_id created_at updated_at`
 | POST | `/api/stores/{id}/semantics/apply` | 저장해 둔 초안을 다시 보내지 않고 적용 (초안이 없으면 409 `NO_DRAFT`) |
 | GET | `/api/stores/{id}/semantics/status` | `{draft, applied, in_sync, require_drive_test}`. `in_sync` 는 적용 결과가 지금 초안과 같은지 |
 | GET | `/api/stores/{id}/semantics/live` | 로봇이 읽는 지도(`config/common`) 상태: `{live_sha, matches_applied, last, backup_count}`. `last` = 마지막 반영/복구 기록 |
-| POST | `/api/stores/{id}/semantics/promote` | **적용 결과를 `config/common` 에 반영.** 먼저 지금 지도를 `data/backups/<store>/<YYYYMMDD-HHMMSS>/` 에 백업(여러 개 계속 보관). 응답 `{backup, live}`, `live.needs_robot_restart=true` — **로봇 노드는 시작할 때만 읽으니 다시 켜야 함** |
+| POST | `/api/stores/{id}/semantics/promote` | **적용 결과를 `config/common` 에 반영.** 먼저 지금 지도를 `data/backups/<store>/<YYYYMMDD-HHMMSS>/` 에 백업(여러 개 계속 보관). 응답 `{backup, live}`, `live.needs_robot_restart=true` — **로봇은 시작할 때와 `reload-map` 명령을 받을 때만 읽음 — 반영 뒤 로봇 카드의 "지도 다시 읽기"** |
 | GET | `/api/stores/{id}/semantics/backups` | 백업 목록(최신순): `{id, created_at, kind(promote/before_restore), note, summary{nodes,edges,tables}}` |
 | POST | `/api/stores/{id}/semantics/backups/{backup_id}/restore` | 그 백업으로 되돌림. 되돌리기 전 지도도 `before_restore` 백업으로 남아서 다시 취소 가능 |
 

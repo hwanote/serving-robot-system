@@ -46,6 +46,7 @@ class FleetManager:
         self.queued_at = {}
         self.last_dispatch = -1e9
         self.home_count = 0
+        self.live_revision = lambda: None     # set by the app: revision of config/common
         self.wait_reason = ''
         self.log = []
         self.dispatch_paused = False
@@ -124,8 +125,32 @@ class FleetManager:
                 'destination_id': t['destination_id'] if t else None,
                 'battery_percent': 100,
                 'online': not r.offline, 'accepting_orders': not r.paused,
+                'localization': (r.ms or {}).get('localization') or None,
+                'map_current': self._map_current(r), 'controls': self._controls(r),
                 'pose': {'x': round(r.pose[0], 3), 'y': round(r.pose[1], 3),
                          'yaw': round(r.pose[2], 4)}}
+
+    # ---- what the robot card's buttons may do (the frontend only shows this)
+    def _map_current(self, r):
+        """True: the robot runs the map that is in config/common now. None: unknown
+        (an older robot node does not report it)."""
+        have, live = (r.ms or {}).get('config_revision'), self.live_revision()
+        if not have or not live:
+            return None
+        return have == live
+
+    def _idle(self, r):
+        ms = r.ms or {}
+        return (ms.get('state') == 'IDLE' and not ms.get('loc_hold')
+                and r.active is None and not r.homing)
+
+    def _controls(self, r):
+        ms, online = r.ms or {}, not r.offline
+        home_ok = ms.get('loc_hold') == 'RECOVERED' or (
+            self._idle(r) and ms.get('localization') == 'OK' and not self._at_home(r))
+        return {'reset': online, 'reset_nodes': [r.home, self.kitchen],
+                'home': online and home_ok,
+                'reload_map': online and self._idle(r) and self._map_current(r) is not True}
 
     def snapshot(self):
         with self.lock:
@@ -408,6 +433,86 @@ class FleetManager:
             r.adapter.send_cmd({'cmd': action})
             self.note('%s: operator chose %s' % (name, action))
             return self.robot_summary(r), None
+
+    def reset_robot(self, name, node=None):
+        """Emergency reset: the robot was put on `node` by hand (default: its home).
+        An order it was driving is canceled. -> (summary, problem)"""
+        with self.lock:
+            r = self.robots.get(name)
+            if not r:
+                return None, 'not found'
+            if r.offline:
+                return self.robot_summary(r), 'offline'
+            node = node or r.home
+            if node not in (self.site.wp.get('poses') or {}):
+                return self.robot_summary(r), 'bad node'
+            t = self.repo.get_task(r.active) if r.active else None
+            r.adapter.send_cmd({'cmd': 'reset', 'node': node})
+            r.homing, r.idle_since = None, None
+            if t:
+                self._finish(r, t, 'CANCELED', {'code': 'RESET'})
+            self.note('%s: operator reset on %s' % (name, node))
+            return self.robot_summary(r), None
+
+    def go_home(self, name):
+        """Home button. After a localization loss the robot's own "home" choice; when it is
+        idle, a drive home, but only if it knows where it is (reset first when it does not).
+        -> (summary, problem)"""
+        with self.lock:
+            r = self.robots.get(name)
+            if not r:
+                return None, 'not found'
+            if r.offline:
+                return self.robot_summary(r), 'offline'
+            ms = r.ms or {}
+            if ms.get('loc_hold') == 'RECOVERED':
+                r.adapter.send_cmd({'cmd': 'home'})
+                self.note('%s: operator chose home' % name)
+                return self.robot_summary(r), None
+            if ms.get('loc_hold'):
+                return self.robot_summary(r), 'not localized'
+            if not self._idle(r):
+                return self.robot_summary(r), 'busy'
+            if ms.get('localization') != 'OK':
+                return self.robot_summary(r), 'not localized'
+            if self._at_home(r):
+                return self.robot_summary(r), 'at home'
+            self.home_count += 1
+            r.homing, r.homing_at, r.idle_since = 'home-%04d' % self.home_count, time.monotonic(), None
+            self.note('%s: operator chose home (%s)' % (name, r.home))
+            r.adapter.send_cmd({'cmd': 'go', 'id': r.homing, 'names': [r.home]})
+            return self.robot_summary(r), None
+
+    def reload_map(self, name):
+        """Tell one robot to read config/common again. It does this only while idle.
+        -> (summary, problem)"""
+        with self.lock:
+            r = self.robots.get(name)
+            if not r:
+                return None, 'not found'
+            if r.offline:
+                return self.robot_summary(r), 'offline'
+            if not self._idle(r):
+                return self.robot_summary(r), 'busy'
+            r.adapter.send_cmd({'cmd': 'reload_map'})
+            self.note('%s: reading the map again' % name)
+            return self.robot_summary(r), None
+
+    def reload_map_all(self):
+        """-> {robot_id: 'sent' | 'offline' | 'busy' | 'current'} (a robot already on the
+        newest map is skipped)."""
+        out = {}
+        with self.lock:
+            names = list(self.robots)
+        for name in names:
+            with self.lock:
+                cur = self._map_current(self.robots[name])
+            if cur is True:
+                out[name] = 'current'
+                continue
+            _, problem = self.reload_map(name)
+            out[name] = problem or 'sent'
+        return out
 
     def robot_summary(self, r):
         e = self.robot_event(r) or {'type': 'robot_state', 'robot_id': r.name,
