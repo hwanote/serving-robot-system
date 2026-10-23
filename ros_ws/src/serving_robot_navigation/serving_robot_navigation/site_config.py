@@ -128,6 +128,12 @@ def _revision(config_dir):
     return h.hexdigest()[:12]
 
 
+def config_revision(config_dir=None):
+    """The same short hash as Site.revision, without loading the site (the backend
+    compares it with the revision a robot reports in its mission_status)."""
+    return _revision(config_dir or default_config_dir())
+
+
 class Site:
     def __init__(self, entities, waypoints, zones, config_dir, revision):
         self.entities = entities

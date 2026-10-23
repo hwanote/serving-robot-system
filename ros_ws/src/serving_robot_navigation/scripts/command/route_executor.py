@@ -12,6 +12,10 @@
                       after LOCALIZATION_RECOVERED: drive on / cancel and drive home
                   {"cmd": "reset", "node": "kitchen"}
                       emergency reset: the robot was put on that node by hand
+                  {"cmd": "reload_map"}
+                      read config/common again (only while idle; a map that does not
+                      load, or lacks the home / kitchen pose, is refused and the old
+                      one stays). The robot reports its map in mission_status.config_revision.
     services  /robot_01/request_detour   std_srvs/Trigger  (take another corridor now)
               /robot_01/cancel_mission   std_srvs/Trigger
               /robot_01/confirm_load     std_srvs/Trigger  (the load is on the robot)
@@ -311,6 +315,8 @@ class RouteExecutor(Node):
             self._home()
         elif kind == 'reset':
             self._reset(cmd)
+        elif kind == 'reload_map':
+            self._reload_map()
         else:
             self._alarm('BAD_COMMAND', 'warn', 'unknown command %r' % kind)
 
@@ -404,6 +410,33 @@ class RouteExecutor(Node):
         self.get_logger().info('reset: robot on %s (x=%.2f y=%.2f yaw=%.0f deg), '
                                'pose given to AMCL' % (pose.name, pose.x, pose.y,
                                                        pose.yaw_deg))
+        self._publish_status()
+
+    def _reload_map(self):
+        """Read config/common again (it is read once at start otherwise)."""
+        if self.core.state != 'IDLE' or self.core.loc_hold:
+            self._alarm('MAP_RELOAD_REFUSED', 'warn',
+                        'map not reloaded: the robot is not idle')
+            return
+        try:
+            new = load_site(self.get_parameter('config_dir').value or None)
+            for key in ('home_name', 'kitchen_name'):
+                new.resolve(str(self.get_parameter(key).value))
+        except Exception as e:      # noqa: BLE001  any failure (bad YAML, missing file,
+            # wrong shape): the old map stays, the robot keeps working
+            self._alarm('MAP_RELOAD_FAILED', 'warn',
+                        'map not reloaded, the old one stays: %s' % e)
+            return
+        old = self.site.revision
+        ok, text = self.core.replace_site(new)
+        if not ok:
+            self._alarm('MAP_RELOAD_REFUSED', 'warn', text)
+            return
+        self.site = new
+        self.get_logger().info('map reloaded: %s -> %s' % (old, new.revision))
+        self._alarm('MAP_RELOADED', 'info',
+                    'map reloaded (%s -> %s)' % (old, new.revision),
+                    {'config_revision': new.revision, 'old_revision': old})
         self._publish_status()
 
     def _confirm(self, kind):

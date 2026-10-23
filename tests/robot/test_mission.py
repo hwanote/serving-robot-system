@@ -1086,6 +1086,31 @@ def test_reset_works_in_every_waiting_state_and_ignores_old_nav_results():
     assert r2.core.state == IDLE and r2.advance(60.0) == []
 
 
+def test_replace_site_only_while_idle_and_reports_its_revision():
+    r = Run(real(), W_S)
+    assert r.core.status()['config_revision'] == real().revision
+    other = real()
+    other.revision = 'abc123abc123'
+    ok, _ = r.core.replace_site(other)
+    assert ok and r.core.site is other
+    assert r.core.status()['config_revision'] == 'abc123abc123'
+    r.core.blocked = {'e1': 99.0}
+    ok, _ = r.core.replace_site(real())
+    assert ok and r.core.blocked == {}, 'old edge ids are forgotten'
+
+
+def test_replace_site_refused_while_driving_or_on_localization_hold():
+    r = Run(real(), W_S)
+    r.core.start_serve(r.t, 's1', 'table_01', r.xy)
+    old = r.core.site
+    ok, text = r.core.replace_site(real())
+    assert not ok and r.core.site is old and 'not idle' in text
+    r2 = Run(real(), W_S)
+    r2.core.loc_hold = 'LOST'
+    ok, _ = r2.core.replace_site(real())
+    assert not ok
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('test_') and callable(fn):

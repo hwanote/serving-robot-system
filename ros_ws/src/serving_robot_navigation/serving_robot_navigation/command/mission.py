@@ -182,6 +182,7 @@ class MissionCore:
             'stalled': self._stalled,
             'localization': self.loc_state or '',
             'loc_hold': self.loc_hold,
+            'config_revision': getattr(self.site, 'revision', ''),
             'delivery_s': round(self.delivery_s, 1),
             'returning': self.returning,
             'table': self.table,
@@ -517,6 +518,19 @@ class MissionCore:
         if had_mission:
             out.append(Action(DONE, result='CANCELED', code='RESET', text=mission_id))
         return mission_id, out
+
+    def replace_site(self, site):
+        """Operator asked the robot to read config/common again. Only while IDLE and
+        not waiting for a localization decision (a map change under a running
+        mission would change its legs). The caller has already loaded and checked
+        `site`. Edges the old map had are forgotten (ids may mean something else).
+        -> (ok, message)"""
+        if self.state != IDLE or self.loc_hold:
+            return False, 'map not reloaded: the robot is not idle (%s)' % (
+                self.loc_hold or self.state)
+        self.site = site
+        self.blocked = {}
+        return True, 'map reloaded'
 
     # ----- planning -------------------------------------------------------------
     def _begin_destination(self, now, xy, start_node):
