@@ -78,3 +78,26 @@ export interface LiveChangeResult {
   backup: MapBackup
   live: NonNullable<LiveStatus['last']>
 }
+
+// ---------- 로봇 카드 버튼 (리셋 / 홈 / 지도 다시 읽기) ----------
+
+/** 백엔드가 계산해서 robot_state 이벤트에 싣는 카드 버튼 규칙. 화면은 이 값만 따른다. */
+export interface RobotControls {
+  /** 연결돼 있으면 true */
+  reset: boolean
+  /** 리셋할 때 고를 수 있는 위치 (대기 위치, 주방). 첫 번째가 기본값 */
+  reset_nodes: string[]
+  /** 쉬고 있고 위치가 OK 일 때만 true (위치를 잃었으면 먼저 리셋) */
+  home: boolean
+  /** 쉬고 있고 로봇 지도가 최신이 아닐 때만 true */
+  reload_map: boolean
+}
+
+/** robot_state 이벤트의 임시 추가 필드 (없어도 동작) */
+export interface RobotExtras {
+  /** OK | DEGRADED | LOST | UNINITIALIZED. 모르면 없음 */
+  localization?: string | null
+  /** 로봇이 쓰는 지도가 지금 config/common 과 같은지. 모르면 null */
+  map_current?: boolean | null
+  controls?: RobotControls
+}

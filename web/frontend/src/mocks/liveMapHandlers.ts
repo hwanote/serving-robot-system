@@ -29,6 +29,9 @@ const state = {
   last: null as null | { at: string; kind: 'promote' | 'restore'; backup_id: string; note: string; needs_robot_restart: boolean },
 }
 
+/** 로봇 지도 비교용: 지금 "config/common" 의 지문 */
+export const liveSha = () => state.live.sha
+
 /** 테스트·개발 패널에서 처음 상태로 */
 export function resetLiveMapMock() {
   state.applied = null

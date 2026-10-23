@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { robotDisplayName } from '../../hooks/useDestinations'
 import type { RobotView } from '../../state/fleetReducer'
 import { formatAgo } from '../../utils/labels'
 import { formatYawDeg } from '../../utils/coordinates'
+import { homeHint, mapBadge, nodeLabel, reloadHint } from '../../utils/robotControls'
 import { Icon } from '../common/Icon'
 import { RobotStateBadge } from '../common/StatusBadge'
 
@@ -26,9 +28,77 @@ interface Props {
   labelOf: (id: string | null) => string
   color: string
   now: number
+  /** 카드 버튼. 없으면 버튼 줄을 그리지 않는다 (확인창·오류 안내는 호출하는 쪽) */
+  actions?: {
+    onReset: (node: string) => void
+    onHome: () => void
+    onReloadMap: () => void
+    /** 지금 요청 중인 버튼 */
+    pending: 'reset' | 'home' | 'reload' | null
+  }
 }
 
-export function RobotCard({ robot, stale, labelOf, color, now }: Props) {
+function LocalizationNote({ value }: { value: string | null | undefined }) {
+  if (!value || value === 'OK') return null
+  const text = value === 'DEGRADED' ? '위치가 조금 불안정해요' : '위치를 모릅니다 — 리셋이 필요해요'
+  return (
+    <div role="status" style={{ fontSize: 12, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}>
+      <Icon name="wifiOff" size={13} /> {text} ({value})
+    </div>
+  )
+}
+
+function ControlRow({ robot, stale, actions }: { robot: RobotView; stale: boolean; actions: NonNullable<Props['actions']> }) {
+  const controls = robot.controls
+  const nodes = controls?.reset_nodes ?? []
+  const [node, setNode] = useState('')
+  if (!controls) return null
+  const chosen = nodes.includes(node) ? node : (nodes[0] ?? '')
+  const off = stale || actions.pending !== null
+  const badge = mapBadge(robot)
+  const homeOff = off || !controls.home
+  const reloadOff = off || !controls.reload_map
+  return (
+    <div className="robot-controls" style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+      <LocalizationNote value={robot.localization} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <label className="muted" style={{ fontSize: 12 }} htmlFor={`reset-node-${robot.robot_id}`}>
+          위치 리셋
+        </label>
+        <select
+          id={`reset-node-${robot.robot_id}`}
+          className="select"
+          value={chosen}
+          disabled={off || !controls.reset || nodes.length < 2}
+          onChange={(e) => setNode(e.target.value)}
+          aria-label={`${robotDisplayName(robot.robot_id)} 리셋할 위치`}
+        >
+          {nodes.map((n) => (
+            <option key={n} value={n}>
+              {nodeLabel(n)}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="btn btn-sm btn-danger" disabled={off || !controls.reset || !chosen} onClick={() => actions.onReset(chosen)} title="로봇을 그 위치에 직접 올려놓은 뒤 누르세요. 진행 중인 주문은 취소돼요.">
+          {actions.pending === 'reset' ? <span className="spinner spinner-sm" /> : null} 리셋
+        </button>
+        <button type="button" className="btn btn-sm" disabled={homeOff} onClick={actions.onHome} title={homeOff && !stale ? homeHint(robot) : '대기 위치로 보냅니다'}>
+          {actions.pending === 'home' ? <span className="spinner spinner-sm" /> : <Icon name="home" size={13} />} 홈
+        </button>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span className="muted" style={{ fontSize: 12, color: badge.tone === 'ok' ? 'var(--ok)' : badge.tone === 'warn' ? 'var(--warn)' : undefined }} data-testid={`map-badge-${robot.robot_id}`}>
+          {badge.text}
+        </span>
+        <button type="button" className="btn btn-sm" disabled={reloadOff} onClick={actions.onReloadMap} title={reloadOff && !stale ? reloadHint(robot) : '로봇이 지도(config/common)를 다시 읽습니다'}>
+          {actions.pending === 'reload' ? <span className="spinner spinner-sm" /> : null} 지도 다시 읽기
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export function RobotCard({ robot, stale, labelOf, color, now, actions }: Props) {
   return (
     <article className="card" style={{ opacity: stale ? 0.75 : 1 }} data-testid={`robot-card-${robot.robot_id}`} aria-label={robotDisplayName(robot.robot_id)}>
       <div className="card-header">
@@ -60,6 +130,7 @@ export function RobotCard({ robot, stale, labelOf, color, now }: Props) {
             <>마지막 수신 {formatAgo(robot.receivedAt, now)}</>
           )}
         </div>
+        {actions ? <ControlRow robot={robot} stale={stale} actions={actions} /> : null}
       </div>
     </article>
   )

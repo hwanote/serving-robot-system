@@ -54,7 +54,7 @@ describe('로봇 지도 반영 패널', () => {
     await user.click(await screen.findByRole('button', { name: '노드 자동 생성' }))
     expect(await screen.findByText(/완료 · OK 21/)).toBeInTheDocument()
     await user.click(button('로봇에 반영'))
-    expect(await screen.findByText(/로봇 노드를 다시 켜야/)).toBeInTheDocument()
+    expect(await screen.findByText(/지도 다시 읽기/)).toBeInTheDocument()
     expect(window.confirm).toHaveBeenCalled()
     await openList(user)
     const list = await screen.findByRole('list', { name: '지도 백업 목록' })
@@ -83,7 +83,7 @@ describe('로봇 지도 반영 패널', () => {
     })
     await user.click(button('로봇에 반영'))
     expect(await screen.findByText(/주문이 진행 중이거나 대기 중이라/)).toBeInTheDocument()
-    expect(screen.queryByText(/로봇 노드를 다시 켜야/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/지도 다시 읽기/)).not.toBeInTheDocument()
   })
 
   it('여러 백업 중 오래된 것을 골라 복구하고, 복구 전 지도도 백업으로 남는다', async () => {
@@ -92,7 +92,7 @@ describe('로봇 지도 반영 패널', () => {
     await user.click(await screen.findByRole('button', { name: '노드 자동 생성' }))
     await screen.findByText(/완료 · OK 21/)
     await user.click(button('로봇에 반영'))
-    await screen.findByText(/로봇 노드를 다시 켜야/)
+    await screen.findByText(/지도 다시 읽기/)
     await openList(user)
     await screen.findByRole('list', { name: '지도 백업 목록' })
     // 초안을 바꿔(테이블 삭제) 다시 반영 → 백업 2개
@@ -109,7 +109,7 @@ describe('로봇 지도 반영 패널', () => {
     await user.click(within(items[items.length - 1]!).getByRole('button', { name: /백업으로 복구/ }))
     await waitFor(() => expect(within(screen.getByRole('list', { name: '지도 백업 목록' })).getAllByRole('listitem')).toHaveLength(3))
     expect(screen.getByText(/복구 직전 지도/)).toBeInTheDocument()
-    expect(screen.getByText(/백업으로 되돌렸어요\. 로봇 노드를 다시 켜야/)).toBeInTheDocument()
+    expect(screen.getByText(/백업으로 되돌렸어요\. 로봇 관제 화면에서 '지도 다시 읽기'/)).toBeInTheDocument()
   })
 
   it('확인창에서 취소하면 아무것도 바뀌지 않는다', async () => {
@@ -128,7 +128,7 @@ describe('로봇 지도 반영 패널', () => {
     await user.click(await screen.findByRole('button', { name: '노드 자동 생성' }))
     await screen.findByText(/완료 · OK 21/)
     await user.click(button('로봇에 반영'))
-    await screen.findByText(/로봇 노드를 다시 켜야/)
+    await screen.findByText(/지도 다시 읽기/)
     await openList(user)
     const list = await screen.findByRole('list', { name: '지도 백업 목록' })
     expect(list.style.overflowY).toBe('auto')

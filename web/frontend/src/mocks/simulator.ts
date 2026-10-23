@@ -6,9 +6,10 @@
  * Task : QUEUED → ASSIGNED → RUNNING → SUCCEEDED
  */
 import type { Pose, RobotState, RobotStateEvent } from '../types/contracts'
-import type { Task, TaskStateEvent } from '../types/provisional'
+import type { RobotExtras, Task, TaskStateEvent } from '../types/provisional'
 import { mockDb, commitMockDb } from './db'
 import { DEFAULT_HOME_POSES, MOCK_ROBOT_IDS } from './fixtures'
+import { liveSha } from './liveMapHandlers'
 
 const TICK_MS = 200
 const SPEED_MPS = 0.6
@@ -29,6 +30,10 @@ interface SimRobot {
   phaseUntil: number | null
   /** Dev 패널에서 강제로 ERROR 상태로 만든 경우 */
   forcedError: boolean
+  /** Dev 패널에서 "위치를 잃은" 상태로 만든 경우 (리셋해야 풀림) */
+  lost: boolean
+  /** 로봇이 읽어 둔 지도의 지문 (liveSha 와 같으면 최신) */
+  mapSha: string
 }
 
 type Broadcast = (message: string) => void
@@ -59,12 +64,43 @@ function ensureRobots() {
       target: null,
       phaseUntil: null,
       forcedError: false,
+      lost: false,
+      mapSha: liveSha(),
     })
   })
 }
 
-export function robotEvent(r: SimRobot): RobotStateEvent {
+const standbyOf = (id: string) => `standby_${id.replace(/^robot_/, '')}`
+
+function kitchenPose(): Pose {
+  const kitchen = mockDb.semantics?.entities.find((e) => e.type === 'kitchen')
+  return { ...(mockDb.semantics?.waypoints.find((w) => w.entity_id === kitchen?.id)?.pose ?? { x: 0, y: 0, yaw: 0 }) }
+}
+
+const atHome = (r: SimRobot) => {
+  const h = homePose(r.id)
+  return Math.hypot(r.pose.x - h.x, r.pose.y - h.y) < 0.1
+}
+const isIdle = (r: SimRobot) => r.state === 'IDLE' && !r.taskId && !r.forcedError
+
+/** 백엔드(fleet/manager.py _controls)와 같은 규칙 */
+function extras(r: SimRobot): RobotExtras {
+  const current = r.mapSha === liveSha()
   return {
+    localization: r.lost ? 'LOST' : 'OK',
+    map_current: current,
+    controls: {
+      reset: true,
+      reset_nodes: [standbyOf(r.id), 'kitchen'],
+      home: isIdle(r) && !r.lost && !atHome(r),
+      reload_map: isIdle(r) && !current,
+    },
+  }
+}
+
+export function robotEvent(r: SimRobot): RobotStateEvent & RobotExtras {
+  return {
+    ...extras(r),
     type: 'robot_state',
     robot_id: r.id,
     state: r.state,
@@ -215,6 +251,65 @@ export function cancelSimTask(task: Task): boolean {
     }
   }
   return true
+}
+
+export type RobotCommandProblem = 'not_found' | 'bad_node' | 'busy' | 'not_localized' | 'at_home'
+
+/** POST /api/robots/{id}/reset */
+export function simReset(robotId: string, node: string | undefined): RobotCommandProblem | null {
+  const r = robots.get(robotId)
+  if (!r) return 'not_found'
+  const where = node ?? standbyOf(robotId)
+  const pose = where === 'kitchen' ? kitchenPose() : where === standbyOf(robotId) ? homePose(robotId) : null
+  if (!pose) return 'bad_node'
+  const task = r.taskId ? mockDb.tasks.find((t) => t.task_id === r.taskId) : undefined
+  if (task && (task.status === 'ASSIGNED' || task.status === 'RUNNING')) setTask(task, { status: 'CANCELED' })
+  r.lost = false
+  setRobot(r, 'IDLE', { pose, taskId: null, destinationId: null, target: null, phaseUntil: null, forcedError: false })
+  return null
+}
+
+/** POST /api/robots/{id}/home */
+export function simHome(robotId: string): RobotCommandProblem | null {
+  const r = robots.get(robotId)
+  if (!r) return 'not_found'
+  if (!isIdle(r)) return 'busy'
+  if (r.lost) return 'not_localized'
+  if (atHome(r)) return 'at_home'
+  setRobot(r, 'RETURNING', { target: homePose(r.id) })
+  return null
+}
+
+/** POST /api/robots/{id}/reload-map */
+export function simReloadMap(robotId: string): RobotCommandProblem | null {
+  const r = robots.get(robotId)
+  if (!r) return 'not_found'
+  if (!isIdle(r)) return 'busy'
+  r.mapSha = liveSha()
+  emitRobot(r)
+  return null
+}
+
+/** POST /api/robots/reload-map → 로봇별 결과 */
+export function simReloadAll(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const r of robots.values()) {
+    if (r.mapSha === liveSha()) out[r.id] = 'current'
+    else out[r.id] = simReloadMap(r.id) ? 'busy' : 'sent'
+  }
+  return out
+}
+
+/** Dev 패널: 위치를 잃은 상태 토글 */
+export function toggleRobotLost(robotId: string) {
+  const r = robots.get(robotId)
+  if (!r) return
+  r.lost = !r.lost
+  emitRobot(r)
+}
+
+export function isRobotLost(robotId: string): boolean {
+  return robots.get(robotId)?.lost ?? false
 }
 
 /** Dev 패널: 로봇 오류 상태 토글 */

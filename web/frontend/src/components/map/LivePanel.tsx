@@ -80,19 +80,19 @@ export function LivePanel({ storeId, dirty, savedKey }: Props) {
     })
 
   const onPromote = () => {
-    if (!window.confirm('이 지도를 로봇이 읽는 지도로 반영할까요?\n\n· 지금 지도는 날짜·시간이 붙은 백업으로 남아서 나중에 되돌릴 수 있어요.\n· 주문이 진행 중이면 반영되지 않아요.\n· 로봇 노드는 다시 켜야 새 지도로 움직여요.')) return
+    if (!window.confirm('이 지도를 로봇이 읽는 지도로 반영할까요?\n\n· 지금 지도는 날짜·시간이 붙은 백업으로 남아서 나중에 되돌릴 수 있어요.\n· 주문이 진행 중이면 반영되지 않아요.\n· 로봇은 로봇 관제 화면에서 "지도 다시 읽기"를 눌러야 새 지도로 움직여요.')) return
     void run('promote', async () => {
       const r = await promoteMap(storeId)
-      setRestartNote(`반영했어요. 로봇 노드를 다시 켜야 새 지도로 움직여요. (이전 지도 백업: ${formatBackupTime(r.backup)})`)
+      setRestartNote(`반영했어요. 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 로봇이 새 지도로 움직여요. (이전 지도 백업: ${formatBackupTime(r.backup)})`)
       return '로봇 지도에 반영했어요.'
     })
   }
 
   const onRestore = (b: MapBackup) => {
-    if (!window.confirm(`${formatBackupTime(b)} 백업(${summaryText(b)})으로 되돌릴까요?\n\n· 지금 지도도 백업으로 남아서 다시 되돌릴 수 있어요.\n· 주문이 진행 중이면 되돌려지지 않아요.\n· 로봇 노드는 다시 켜야 해요.`)) return
+    if (!window.confirm(`${formatBackupTime(b)} 백업(${summaryText(b)})으로 되돌릴까요?\n\n· 지금 지도도 백업으로 남아서 다시 되돌릴 수 있어요.\n· 주문이 진행 중이면 되돌려지지 않아요.\n· 로봇은 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 해요.`)) return
     void run(`restore:${b.id}`, async () => {
       await restoreBackup(storeId, b.id)
-      setRestartNote(`${formatBackupTime(b)} 백업으로 되돌렸어요. 로봇 노드를 다시 켜야 새 지도로 움직여요.`)
+      setRestartNote(`${formatBackupTime(b)} 백업으로 되돌렸어요. 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 로봇이 새 지도로 움직여요.`)
       return '백업으로 되돌렸어요.'
     })
   }

@@ -19,7 +19,7 @@ import {
   type Zone,
   type ZoneType,
 } from '../types/contracts'
-import type { LiveChangeResult, LiveStatus, MapBackup, SemanticStatus, Task, TaskStateEvent } from '../types/provisional'
+import type { LiveChangeResult, LiveStatus, MapBackup, RobotControls, RobotExtras, SemanticStatus, Task, TaskStateEvent } from '../types/provisional'
 
 export class ContractError extends Error {
   constructor(message: string) {
@@ -152,7 +152,29 @@ export function parseTask(value: unknown): Task {
   }
 }
 
-export type StateSocketEvent = RobotStateEvent | TaskStateEvent
+export type StateSocketEvent = (RobotStateEvent & RobotExtras) | TaskStateEvent
+
+function parseControls(value: unknown): RobotControls | undefined {
+  if (value === undefined || value === null) return undefined
+  const o = obj(value, 'robot_state.controls')
+  const nodes = o.reset_nodes === undefined ? [] : arr(o.reset_nodes, 'robot_state.controls.reset_nodes').map((n, i) => str(n, `robot_state.controls.reset_nodes[${i}]`))
+  return { reset: o.reset === true, reset_nodes: nodes, home: o.home === true, reload_map: o.reload_map === true }
+}
+
+/** 없어도 되는 추가 필드. 모양이 틀리면 그 필드만 버리고 나머지(Contract)는 그대로 받는다. */
+function parseRobotExtras(o: Obj): RobotExtras {
+  const out: RobotExtras = {}
+  if (typeof o.localization === 'string') out.localization = o.localization
+  if (typeof o.map_current === 'boolean') out.map_current = o.map_current
+  else if (o.map_current === null) out.map_current = null
+  try {
+    const controls = parseControls(o.controls)
+    if (controls) out.controls = controls
+  } catch {
+    // 버튼 규칙을 읽지 못하면 버튼을 숨길 뿐, 로봇 상태 표시는 막지 않는다
+  }
+  return out
+}
 
 /** /ws/state 메시지 파싱. 알 수 없는 type 은 null (무시), Contract 위반은 ContractError. */
 export function parseStateEvent(raw: unknown): StateSocketEvent | null {
@@ -168,6 +190,7 @@ export function parseStateEvent(raw: unknown): StateSocketEvent | null {
       destination_id: optStr(o.destination_id, 'robot_state.destination_id'),
       battery_percent: Math.max(0, Math.min(100, battery)),
       pose: parsePose(o.pose, 'robot_state.pose'),
+      ...parseRobotExtras(o),
     }
   }
   if (o.type === 'task_state') {

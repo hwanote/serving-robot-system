@@ -1,8 +1,8 @@
 import type { SocketStatusInfo } from '../api/stateSocket'
 import type { RobotStateEvent, TaskStatus } from '../types/contracts'
-import type { Task, TaskStateEvent } from '../types/provisional'
+import type { RobotExtras, Task, TaskStateEvent } from '../types/provisional'
 
-export interface RobotView extends RobotStateEvent {
+export interface RobotView extends RobotStateEvent, RobotExtras {
   /** 마지막 수신 시각 (ms epoch) */
   receivedAt: number
 }
@@ -22,7 +22,7 @@ export interface FleetState {
 
 export type FleetAction =
   | { type: 'socket_status'; info: SocketStatusInfo }
-  | { type: 'robot_state'; event: RobotStateEvent; receivedAt: number }
+  | { type: 'robot_state'; event: RobotStateEvent & RobotExtras; receivedAt: number }
   | { type: 'task_state'; event: TaskStateEvent }
   | { type: 'tasks_loading' }
   | { type: 'tasks_loaded'; tasks: Task[] }

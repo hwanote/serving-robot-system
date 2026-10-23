@@ -12,11 +12,28 @@ import mapPngDataUrl from './assets/demo_store_map.png?inline'
 import { commitMockDb, mockDb, nextTaskId, type FailureKey } from './db'
 import { buildRawMap, MOCK_STORE_ID } from './fixtures'
 import { liveMapHandlers } from './liveMapHandlers'
-import { cancelSimTask, enqueueTask } from './simulator'
+import { cancelSimTask, enqueueTask, simHome, simReloadAll, simReloadMap, simReset, type RobotCommandProblem } from './simulator'
 
 const api = (path: string) => `${API_BASE_URL}/api${path}`
 
 const error = (status: number, message: string) => HttpResponse.json({ message }, { status })
+const refuse = (status: number, code: string, message: string) => HttpResponse.json({ code, message }, { status })
+
+/** 백엔드 routers/robots.py 와 같은 거절 코드·문구 */
+function robotRefusal(robotId: string, problem: RobotCommandProblem) {
+  switch (problem) {
+    case 'not_found':
+      return refuse(404, 'ROBOT_NOT_FOUND', `로봇을 찾을 수 없습니다: ${robotId}`)
+    case 'bad_node':
+      return refuse(400, 'BAD_NODE', '지도에 없는 위치예요.')
+    case 'busy':
+      return refuse(409, 'ROBOT_BUSY', '로봇이 임무 중입니다. 끝난 뒤에 눌러 주세요.')
+    case 'not_localized':
+      return refuse(409, 'NOT_LOCALIZED', '로봇이 자기 위치를 아직 모릅니다. 먼저 리셋해서 위치를 잡아 주세요.')
+    case 'at_home':
+      return refuse(409, 'ALREADY_HOME', '이미 대기 위치에 있습니다.')
+  }
+}
 
 async function respondDelay() {
   if (mockDb.latencyMs > 0) await delay(mockDb.latencyMs)
@@ -138,6 +155,33 @@ export const httpHandlers = [
     mockDb.semantics = toSemanticPayload(doc)
     commitMockDb()
     return HttpResponse.json(mockDb.semantics)
+  }),
+
+  http.post(api('/robots/reload-map'), async () => {
+    await respondDelay()
+    return HttpResponse.json({ robots: simReloadAll() })
+  }),
+
+  http.post(api('/robots/:robotId/reset'), async ({ params, request }) => {
+    await respondDelay()
+    const body = (await readJson(request)) as { node?: unknown } | null
+    const robotId = String(params.robotId)
+    const problem = simReset(robotId, typeof body?.node === 'string' ? body.node : undefined)
+    return problem ? robotRefusal(robotId, problem) : HttpResponse.json({ robot_id: robotId })
+  }),
+
+  http.post(api('/robots/:robotId/home'), async ({ params }) => {
+    await respondDelay()
+    const robotId = String(params.robotId)
+    const problem = simHome(robotId)
+    return problem ? robotRefusal(robotId, problem) : HttpResponse.json({ robot_id: robotId })
+  }),
+
+  http.post(api('/robots/:robotId/reload-map'), async ({ params }) => {
+    await respondDelay()
+    const robotId = String(params.robotId)
+    const problem = simReloadMap(robotId)
+    return problem ? robotRefusal(robotId, problem) : HttpResponse.json({ robot_id: robotId })
   }),
 
   http.get(api('/tasks'), async () => {

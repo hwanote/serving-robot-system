@@ -7,7 +7,7 @@ import { Icon } from '../components/common/Icon'
 import { dropAllSocketClients } from './browser'
 import { FAILURE_KEYS, FAILURE_LABELS, mockDb, commitMockDb, resetMockDb, seedMockDb, subscribeMockDb } from './db'
 import { MOCK_ROBOT_IDS } from './fixtures'
-import { isRobotForcedError, resetSimulator, toggleRobotError } from './simulator'
+import { isRobotForcedError, isRobotLost, resetSimulator, toggleRobotError, toggleRobotLost } from './simulator'
 
 let version = 0
 subscribeMockDb(() => {
@@ -119,6 +119,11 @@ export default function MockDevPanel() {
             {MOCK_ROBOT_IDS.map((id) => (
               <button key={id} type="button" className="btn btn-sm" onClick={() => update(() => toggleRobotError(id))}>
                 {id} {isRobotForcedError(id) ? '오류 해제' : '오류 발생'}
+              </button>
+            ))}
+            {MOCK_ROBOT_IDS.map((id) => (
+              <button key={`lost-${id}`} type="button" className="btn btn-sm" onClick={() => update(() => toggleRobotLost(id))}>
+                {id} {isRobotLost(id) ? '위치 복구' : '위치 잃음'}
               </button>
             ))}
             <button type="button" className="btn btn-sm" onClick={() => update(resetSimulator)}>

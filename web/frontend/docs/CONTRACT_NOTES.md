@@ -87,3 +87,7 @@ Contract 예시의 entity 는 `id/type/label` 만 있어 테이블 위치를 지
 
 ## 3-2c. 지도 반영(promote)·백업 — 우리 Backend 전용 (2026-10-23)
 `GET .../semantics/status`, `POST .../semantics/apply`, `GET .../semantics/live`, `POST .../semantics/promote`, `GET .../semantics/backups`, `POST .../semantics/backups/{id}/restore`. 응답·거절 코드는 `web/backend/docs/API.md`. 백업 id 는 서버 시각 `YYYYMMDD-HHMMSS`(같은 초면 `-2`)이고, 화면에는 `created_at` 을 PC 시간대로 바꿔 보여 준다. Mock 은 `src/mocks/liveMapHandlers.ts`.
+
+## 3-2d. 로봇 카드 버튼 — 우리 Backend 전용 (2026-10-23)
+`robot_state` 이벤트(와 `GET /api/robots`)에 **선택 필드**가 붙는다: `localization`(`OK|DEGRADED|LOST|UNINITIALIZED`), `map_current`(`true|false|null`), `controls`(`{reset, reset_nodes[], home, reload_map}`). 없어도 화면은 동작하고(버튼 줄만 숨김), 모양이 틀리면 그 필드만 버린다(`parseRobotExtras`). 버튼 켜짐/꺼짐은 화면이 판단하지 않고 `controls` 를 따른다.
+`POST /api/robots/{id}/reset|home|reload-map`, `POST /api/robots/reload-map` — 규칙·거절 코드는 `web/backend/docs/API.md`. Mock 은 `src/mocks/simulator.ts`(규칙)와 `handlers.ts`(거절 코드), 위치 잃음 흉내는 Mock 제어 패널의 "위치 잃음".
