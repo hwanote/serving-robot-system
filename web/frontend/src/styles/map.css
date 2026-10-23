@@ -1,0 +1,410 @@
+/* ---------- Map viewport ---------- */
+.map-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  background: #e9edf1;
+  background-image: linear-gradient(45deg, #e3e8ec 25%, transparent 25%), linear-gradient(-45deg, #e3e8ec 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e3e8ec 75%), linear-gradient(-45deg, transparent 75%, #e3e8ec 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  outline: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.map-viewport:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.map-svg {
+  display: block;
+}
+
+.map-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.map-zoom {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.tool-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.tool-btn:last-child {
+  border-bottom: none;
+}
+
+.tool-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.map-readout {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+}
+
+.map-scalebar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  color: var(--text-2);
+}
+
+.map-scalebar span {
+  display: inline-block;
+  height: 6px;
+  border: 1.5px solid var(--text-2);
+  border-top: none;
+}
+
+.map-overlay-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-2);
+  pointer-events: none;
+}
+
+.map-overlay-error {
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.map-notice {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 60%;
+}
+
+.map-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 32, 40, 0.88);
+  color: #fff;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ---------- Map setup page ---------- */
+.setup-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  /* 지도 영역은 화면 높이에 맞추고, 오른쪽 패널만 독립 스크롤 */
+  grid-template-rows: minmax(560px, 1fr);
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 좁은 화면: 지도 높이 고정 + 오른쪽 패널을 지도 아래로 펼치고 페이지 전체 스크롤 */
+@media (max-width: 1100px) {
+  .page-full {
+    height: auto;
+  }
+
+  .setup-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 560px auto;
+  }
+
+  .setup-layout .setup-side {
+    overflow: visible;
+    padding-right: 0;
+  }
+}
+
+.setup-map {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.setup-map .map-viewport {
+  flex: 1;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.setup-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.setup-side > .card {
+  flex: none;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding-right: 8px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border);
+}
+
+.toolbar-group:last-child {
+  border-right: none;
+}
+
+.toolbar-label {
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.tool-chip {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.tool-chip:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.tool-chip[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.tool-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+  flex: none;
+}
+
+.mapping-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.object-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.object-list li button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.object-list li button:hover {
+  background: var(--surface-2);
+}
+
+.object-list li button[aria-current='true'] {
+  background: var(--accent-soft);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  font-size: 13px;
+  align-items: center;
+}
+
+.kv dt {
+  color: var(--text-3);
+}
+
+.kv dd {
+  margin: 0;
+}
+
+.pose-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.issue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow: auto;
+  font-size: 12.5px;
+}
+
+.map-draft-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: var(--surface);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.setup-side {
+  overflow-x: hidden;
+}
+
+.setup-side .field .input,
+.setup-side .field .select {
+  width: 100%;
+}
+
+/* ---------- Robot control page ---------- */
+.robot-layout {
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.robot-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.robot-map {
+  display: flex;
+  flex-direction: column;
+  min-height: 560px;
+}
+
+.robot-map .map-viewport {
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+@media (max-width: 1100px) {
+  .robot-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .setup-layout .setup-side {
+    overflow: visible;
+  }
+}
+
+/* 구역 도구: 아직 로봇 동작에 반영되지 않음을 알리는 표시 */
+.chip-soon {
+  margin-left: 2px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: #edf0f3;
+  color: var(--text-2);
+}
+
+.zone-soon-note {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: #fff6e0;
+  color: #7a5a00;
+}

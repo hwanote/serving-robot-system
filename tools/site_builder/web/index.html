@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>매장 설정 도구</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c2330; --muted: #5d6677; --line: #d8dde6;
+    --accent: #2f6fed; --ok: #1f9d55; --warn: #d98a00; --fail: #d64545;
+    --standby: #2f6fed; --pickup: #e07a1f; --table: #7b57d6; --map-bg: #e9ecf1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171d; --panel: #1d222b; --ink: #e8ebf1; --muted: #9aa4b5; --line: #2f3643;
+            --accent: #6d97f5; --ok: #43c47c; --warn: #f0b13b; --fail: #ef6b6b;
+            --standby: #6d97f5; --pickup: #f0954a; --table: #a48cf0; --map-bg: #0f1217; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 10px 16px;
+           border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; padding: 12px 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  #stage { position: relative; }
+  #map { width: 100%; height: min(72vh, 760px); display: block; background: var(--map-bg);
+         border-radius: 8px; touch-action: none; cursor: crosshair; user-select: none; }
+  #map.pan { cursor: grab; }
+  #map image { image-rendering: pixelated; }
+  #status { position: absolute; left: 8px; bottom: 6px; font-size: 12px; color: var(--muted);
+            background: color-mix(in srgb, var(--panel) 85%, transparent); padding: 2px 8px; border-radius: 4px; }
+  #banner { display: none; margin: 8px 0 0; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+  #banner.err { display: block; background: color-mix(in srgb, var(--fail) 14%, var(--panel)); border: 1px solid var(--fail); }
+  #banner.info { display: block; background: color-mix(in srgb, var(--warn) 14%, var(--panel)); border: 1px solid var(--warn); }
+  aside { display: flex; flex-direction: column; gap: 12px; }
+  .sec { padding: 10px 12px; }
+  .sec h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+  .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+           border-radius: 6px; padding: 6px 8px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .row label { color: var(--muted); font-size: 12px; }
+  input[type=text], input[type=number] { font: inherit; color: var(--ink); background: var(--bg);
+           border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; width: 100%; }
+  input[type=number] { width: 64px; }
+  #list { max-height: 230px; overflow: auto; }
+  .item { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 6px; align-items: center;
+          padding: 4px 4px; border-radius: 4px; cursor: pointer; }
+  .item.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .dot { width: 10px; height: 10px; border-radius: 2px; }
+  .item small { color: var(--muted); }
+  .sum { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid var(--line); }
+  .pill.ok { color: var(--ok); } .pill.warn { color: var(--warn); } .pill.fail { color: var(--fail); }
+  ul.plain { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+  ul.plain li { margin: 2px 0; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  table.dt { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+  table.dt td, table.dt th { padding: 2px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+  .prop { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-top: 6px; font-size: 13px; }
+  .prop.approved { border-color: var(--ok); } .prop.rejected { opacity: .55; }
+  .prop .btns { display: flex; gap: 6px; margin-top: 6px; }
+  svg text { font-size: 0.17px; paint-order: stroke; stroke: var(--map-bg); stroke-width: 0.05px; fill: var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <h1>매장 설정 도구</h1>
+  <span class="sub" id="mapname">지도를 불러오는 중…</span>
+</header>
+<main>
+  <section>
+    <div id="stage" class="card">
+      <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="매장 지도"></svg>
+      <div id="status">—</div>
+    </div>
+    <div id="banner" role="status"></div>
+  </section>
+  <aside>
+    <div class="card sec">
+      <h2>1. 지도에 점 찍기</h2>
+      <div class="tools" id="tools">
+        <button data-tool="move" aria-pressed="true" title="끌어서 이동, 휠로 확대">이동</button>
+        <button data-tool="standby" aria-pressed="false">대기</button>
+        <button data-tool="pickup" aria-pressed="false">픽업</button>
+        <button data-tool="table" aria-pressed="false">테이블</button>
+      </div>
+      <div class="row" id="tableopts">
+        <label>상판 가로 <input type="number" id="topx" value="0.8" step="0.1" min="0.3" max="3"></label>
+        <label>세로 <input type="number" id="topy" value="0.8" step="0.1" min="0.3" max="3"></label>
+        <label><input type="checkbox" id="chairs" checked> 의자 좌우</label>
+      </div>
+      <div class="hint">대기=로봇이 쉬는 곳, 픽업=음료를 싣는 카운터, 테이블=서빙할 테이블 중심. 점을 눌러 선택, 지우기는 목록의 ✕.</div>
+    </div>
+    <div class="card sec">
+      <h2>점 목록 <span id="count"></span></h2>
+      <div id="list"></div>
+      <div class="row">
+        <button id="load-demo" title="예시 라벨을 불러와요">예시 불러오기</button>
+        <button id="clear">모두 지우기</button>
+      </div>
+    </div>
+    <div class="card sec">
+      <h2>2. 주행 구간 만들기</h2>
+      <div class="row" style="margin-top:0">
+        <button class="primary" id="gen">주행 구간 만들기</button>
+        <button id="export" disabled>내보내기</button>
+      </div>
+      <div class="hint" id="exporthint">내보내기는 <code>config/generated/</code>에만 써요 (검토 전 임시 설정).</div>
+      <div id="result"></div>
+    </div>
+    <div class="card sec" id="drivecard">
+      <h2>3. 주행 시험 결과와 조정</h2>
+      <div id="drive"></div>
+    </div>
+  </aside>
+</main>
+<script>
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const $ = (id) => document.getElementById(id);
+const KIND_NAME = { standby: "대기", pickup: "픽업", table: "테이블" };
+const COLOR = { standby: "var(--standby)", pickup: "var(--pickup)", table: "var(--table)" };
+const LEVEL_COLOR = { OK: "var(--ok)", WARN: "var(--warn)", FAIL: "var(--fail)" };
+
+const S = {
+  map: null,                      // /api/map
+  labels: [],                     // [{id, kind, x_m, y_m, top_size_m?, chairs?}]
+  tool: "move",
+  sel: null,                      // selected label id
+  vb: null,                       // {x, y, w, h}  (svg y = -world y)
+  result: null,                   // preview.json of the last run
+  stale: false,                   // labels changed after the last run
+  saveTimer: null,
+  drive: null,                    // /api/drive
+  adj: null,                      // preview.json made with the approved adjustments
+};
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs || {}) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function h(tag, attrs, children) {          // html element; text only via textContent
+  const e = document.createElement(tag);
+  for (const k in attrs || {}) {
+    if (k === "text") e.textContent = attrs[k]; else e.setAttribute(k, attrs[k]);
+  }
+  (children || []).forEach((c) => e.appendChild(c));
+  return e;
+}
+
+async function api(method, path, body) {
+  const opt = { method, headers: {} };
+  if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+function banner(kind, text) {
+  const b = $("banner");
+  b.className = text ? kind : "";
+  b.textContent = text || "";
+}
+
+// ------------------------------------------------------------------ labels
+function labelsDoc() {
+  return {
+    schema_version: 1, map_revision: S.map.map_revision,
+    labels: S.labels.map((l) => {
+      const o = { id: l.id, kind: l.kind, x_m: round(l.x_m), y_m: round(l.y_m) };
+      if (l.top_size_m) o.top_size_m = l.top_size_m;
+      if (l.chairs) o.chairs = l.chairs;
+      if (l.aliases && l.aliases.length) o.aliases = l.aliases;
+      return o;
+    }),
+  };
+}
+function round(v) { return Math.round(v * 1000) / 1000; }
+
+function nextId(kind) {
+  const base = kind === "pickup" ? "kitchen" : kind === "standby" ? "standby_" : "table_";
+  if (kind === "pickup") {
+    if (!S.labels.some((l) => l.id === "kitchen")) return "kitchen";
+    for (let i = 2; ; i++) { const id = "counter_" + String(i).padStart(2, "0");
+      if (!S.labels.some((l) => l.id === id)) return id; }
+  }
+  for (let i = 1; ; i++) {
+    const id = base + String(i).padStart(2, "0");
+    if (!S.labels.some((l) => l.id === id)) return id;
+  }
+}
+
+function changed() {
+  if (S.result) S.stale = true;
+  S.adj = null;
+  renderAll();
+  clearTimeout(S.saveTimer);
+  S.saveTimer = setTimeout(() => {
+    api("PUT", "/api/labels", labelsDoc()).then(loadDrive).catch((e) => banner("err", "저장하지 못했어요: " + e.message));
+  }, 400);
+}
+
+function addLabel(kind, x, y) {
+  const l = { id: nextId(kind), kind, x_m: x, y_m: y };
+  if (kind === "table") {
+    l.top_size_m = { x: +$("topx").value || 0.8, y: +$("topy").value || 0.8 };
+    if ($("chairs").checked) l.chairs = [{ dx: -0.65, dy: 0.0, size_m: 0.45 }, { dx: 0.65, dy: 0.0, size_m: 0.45 }];
+  }
+  S.labels.push(l);
+  S.sel = l.id;
+  changed();
+}
+
+function removeLabel(id) {
+  S.labels = S.labels.filter((l) => l.id !== id);
+  if (S.sel === id) S.sel = null;
+  changed();
+}
+
+function renameLabel(l, value) {
+  const old = l.id;
+  const v = value.trim();
+  if (!/^[a-z][a-z0-9_]*$/.test(v)) { banner("err", "이름은 영문 소문자로 시작하고 소문자·숫자·밑줄(_)만 쓸 수 있어요."); return false; }
+  if (S.labels.some((o) => o !== l && o.id === v)) { banner("err", "같은 이름이 이미 있어요: " + v); return false; }
+  banner("", ""); l.id = v; if (S.sel === old) S.sel = v; changed(); return true;
+}
+
+// ------------------------------------------------------------------ view
+const svg = $("map");
+let gMap, gDrive, gResult, gMarks;
+
+function setupSvg() {
+  const m = S.map, W = m.width_px * m.resolution_m, H = m.height_px * m.resolution_m;
+  S.full = { x: m.origin.x_m, y: -(m.origin.y_m + H), w: W, h: H };
+  S.vb = { ...S.full };
+  svg.textContent = "";
+  gMap = el("g", {}, svg); gDrive = el("g", {}, svg); gResult = el("g", {}, svg); gMarks = el("g", {}, svg);
+  const img = el("image", { href: "/api/map.png", x: S.full.x, y: S.full.y, width: W, height: H,
+                            preserveAspectRatio: "none" }, gMap);
+  img.style.imageRendering = "pixelated";
+  applyView();
+}
+
+function applyView() {
+  const r = svg.getBoundingClientRect();
+  const aspect = r.width / Math.max(r.height, 1);
+  const v = S.vb;
+  let w = v.w, hh = v.h;                     // keep the picture's aspect equal to the window's
+  if (w / hh > aspect) hh = w / aspect; else w = hh * aspect;
+  svg.setAttribute("viewBox", [v.x - (w - v.w) / 2, v.y - (hh - v.h) / 2, w, hh].join(" "));
+  S.px = w / Math.max(r.width, 1);           // metres per screen pixel
+}
+
+function toWorld(ev) {
+  const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+  const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+  return { x: p.x, y: -p.y };
+}
+
+function renderAll() { renderMarks(); renderDrive(); renderResult(); renderList(); renderResultPanel(); renderDrivePanel(); }
+
+function renderMarks() {
+  gMarks.textContent = "";
+  for (const l of S.labels) {
+    const g = el("g", {}, gMarks), sy = -l.y_m, sel = l.id === S.sel;
+    if (l.kind === "table") {
+      const t = l.top_size_m || { x: 0.8, y: 0.8 };
+      for (const c of l.chairs || []) {
+        el("rect", { x: l.x_m + c.dx - c.size_m / 2, y: -(l.y_m + c.dy) - c.size_m / 2, width: c.size_m, height: c.size_m,
+                     fill: "none", stroke: COLOR.table, "stroke-dasharray": "0.05 0.04", "stroke-width": 0.02, opacity: 0.8 }, g);
+      }
+      el("rect", { x: l.x_m - t.x / 2, y: sy - t.y / 2, width: t.x, height: t.y, fill: COLOR.table,
+                   "fill-opacity": 0.22, stroke: COLOR.table, "stroke-width": sel ? 0.05 : 0.025 }, g);
+    } else if (l.kind === "pickup") {
+      el("rect", { x: l.x_m - 0.12, y: sy - 0.12, width: 0.24, height: 0.24, fill: COLOR.pickup,
+                   transform: "rotate(45 " + l.x_m + " " + sy + ")", stroke: sel ? "var(--ink)" : "none", "stroke-width": 0.03 }, g);
+    } else {
+      el("circle", { cx: l.x_m, cy: sy, r: 0.13, fill: COLOR.standby, stroke: sel ? "var(--ink)" : "none", "stroke-width": 0.03 }, g);
+    }
+    const t = el("text", { x: l.x_m + 0.16, y: sy - 0.14 }, g); t.textContent = l.id;
+  }
+}
+
+function renderResult() {
+  gResult.textContent = "";
+  const R = S.adj || S.result;
+  if (!R) return;
+  gResult.setAttribute("opacity", S.stale && !S.adj ? 0.3 : 1);
+  const node = (id) => R.nodes[id];
+  for (const e of R.edges) {
+    const a = node(e.from), b = node(e.to);
+    const ln = el("line", { x1: a.x, y1: -a.y, x2: b.x, y2: -b.y, stroke: LEVEL_COLOR[e.level], "stroke-width": 0.06,
+                            "stroke-linecap": "round", opacity: 0.85 }, gResult);
+    if (e.note) ln.setAttribute("stroke-dasharray", "0.12 0.08");
+  }
+  for (const id in R.nodes) {
+    const n = R.nodes[id];
+    el("circle", { cx: n.x, cy: -n.y, r: 0.075, fill: LEVEL_COLOR[n.level], stroke: "var(--panel)", "stroke-width": 0.02 }, gResult);
+  }
+  const P = R.params, hs = P.hard_stop_m;
+  for (const name in R.poses) {
+    const p = R.poses[name], yaw = p.yaw_deg * Math.PI / 180;
+    const ex = p.x + 0.42 * Math.cos(yaw), ey = p.y + 0.42 * Math.sin(yaw);
+    el("line", { x1: p.x, y1: -p.y, x2: ex, y2: -ey, stroke: "var(--ink)", "stroke-width": 0.035, "stroke-linecap": "round" }, gResult);
+    el("circle", { cx: ex, cy: -ey, r: 0.045, fill: "var(--ink)" }, gResult);
+    if (S.hsPose === name) {          // HardStop rectangle at this pose
+      const u0 = -(P.rear_m + hs), u1 = P.front_m + hs, v = P.half_width_m + hs;
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      const pts = [[u0, -v], [u1, -v], [u1, v], [u0, v]].map(([u, w]) =>
+        (p.x + u * c - w * s) + "," + (-(p.y + u * s + w * c)));
+      el("polygon", { points: pts.join(" "), fill: "var(--fail)", "fill-opacity": 0.12, stroke: "var(--fail)",
+                      "stroke-width": 0.025 }, gResult);
+    }
+  }
+}
+
+function renderList() {
+  const box = $("list"); box.textContent = "";
+  $("count").textContent = S.labels.length ? "(" + S.labels.length + ")" : "";
+  if (!S.labels.length) { box.appendChild(h("div", { class: "hint", text: "아직 찍은 점이 없어요. 위에서 종류를 고르고 지도를 눌러 주세요." })); return; }
+  for (const l of S.labels) {
+    const dot = h("span", { class: "dot" }); dot.style.background = COLOR[l.kind];
+    const inp = h("input", { type: "text", value: l.id, "aria-label": "이름" });
+    inp.addEventListener("click", (e) => e.stopPropagation());
+    inp.addEventListener("change", () => { if (!renameLabel(l, inp.value)) inp.value = l.id; });
+    const sub = h("small", { text: KIND_NAME[l.kind] + "  (" + l.x_m.toFixed(2) + ", " + l.y_m.toFixed(2) + ")" });
+    const mid = h("div", {}, [inp, sub]);
+    const del = h("button", { title: "지우기", "aria-label": l.id + " 지우기", text: "✕" });
+    del.addEventListener("click", (e) => { e.stopPropagation(); removeLabel(l.id); });
+    const row = h("div", { class: "item" + (l.id === S.sel ? " sel" : "") }, [dot, mid, del]);
+    row.addEventListener("click", () => { S.sel = l.id; renderAll(); });
+    box.appendChild(row);
+  }
+}
+
+function pill(cls, text) { return h("span", { class: "pill " + cls, text }); }
+
+function renderResultPanel() {
+  const box = $("result"); box.textContent = "";
+  const R = S.result;
+  $("export").disabled = !(R && !S.stale && R.summary.FAIL === 0);
+  if (!R) return;
+  if (S.stale) box.appendChild(h("div", { class: "hint", text: "점이 바뀌었어요. 다시 만들어야 지도의 결과가 맞아져요." }));
+  const sum = h("div", { class: "sum" }, [pill("ok", "OK " + R.summary.OK), pill("warn", "WARN " + R.summary.WARN), pill("fail", "FAIL " + R.summary.FAIL)]);
+  box.appendChild(h("div", { style: "margin-top:8px" }, [sum]));
+  box.appendChild(h("div", { class: "hint", text: "노드 " + Object.keys(R.nodes).length + "개, 연결선 " + R.edges.length + "개. 선 색 = 통로 폭, 점 색 = 제자리 회전 여유(HardStop 기준)." }));
+  const poses = h("ul", { class: "plain" });
+  for (const name in R.poses) {
+    const p = R.poses[name];
+    const li = h("li", { style: "cursor:pointer" });
+    li.appendChild(pill(p.level === "OK" ? "ok" : p.level === "WARN" ? "warn" : "fail", p.level));
+    li.appendChild(document.createTextNode(" " + name + " → " + p.node + ", 방향 " + Math.round(p.yaw_deg) + "°" +
+      (p.aliases && p.aliases.length ? " (" + p.aliases.join(", ") + ")" : "")));
+    li.addEventListener("click", () => { S.hsPose = S.hsPose === name ? null : name; renderResult(); });
+    poses.appendChild(li);
+  }
+  box.appendChild(h("div", { class: "hint", text: "목적지를 누르면 그 자리의 HardStop 사각형을 보여줘요." }));
+  box.appendChild(poses);
+  if (R.excluded.length) {
+    const ul = h("ul", { class: "plain" });
+    for (const x of R.excluded) ul.appendChild(h("li", { text: x.id + ": " + x.reason }));
+    box.appendChild(h("div", { class: "hint", text: "만들지 못한 점" })); box.appendChild(ul);
+  }
+  if (R.warnings.length) {
+    const ul = h("ul", { class: "plain" });
+    for (const w of R.warnings) ul.appendChild(h("li", { text: w }));
+    box.appendChild(h("div", { class: "hint", text: "알림" })); box.appendChild(ul);
+  }
+  if (R.exported_to) box.appendChild(h("div", { class: "hint", text: "내보냈어요: " + R.exported_to + " (status: provisional)" }));
+}
+
+
+// ------------------------------------------------------------------ drive test + adjustments
+const DRIVE_COLOR = { OK: "var(--ok)", WARN: "var(--warn)", FAIL: "var(--fail)" };
+const KIND_TEXT = { shift_line: "줄 옮기기", remove_edge: "구간 빼기", review_edge: "사람이 확인" };
+const VERDICT_TEXT = { PASS: "통과", COLLISION: "충돌", HARDSTOP: "HardStop", BLOCKED: "막힘", OFF_RAIL: "경로 이탈",
+                       NAV_FAILED: "주행 실패", TIMEOUT: "시간 초과", FAILED: "실패" };
+
+function renderDrive() {                       // measured result drawn under the corridors
+  gDrive.textContent = "";
+  const D = S.drive;
+  if (!D || !D.available || D.labels_changed) return;
+  const adjusted = !!S.adj;
+  for (const e of D.edges) {
+    const lv = e.dirs.map((d) => d.level).filter(Boolean);
+    const worst = lv.includes("FAIL") ? "FAIL" : lv.includes("WARN") ? "WARN" : lv.length ? "OK" : null;
+    const ln = el("line", { x1: e.a.x, y1: -e.a.y, x2: e.b.x, y2: -e.b.y, "stroke-linecap": "round",
+      stroke: adjusted ? "var(--muted)" : (worst ? DRIVE_COLOR[worst] : "var(--muted)"),
+      "stroke-width": adjusted ? 0.04 : 0.2, opacity: adjusted ? 0.5 : 0.35 }, gDrive);
+    if (adjusted || !worst) ln.setAttribute("stroke-dasharray", "0.06 0.06");
+  }
+}
+
+function lvPill(d) {
+  const cls = d.level === "OK" ? "ok" : d.level === "WARN" ? "warn" : d.level === "FAIL" ? "fail" : "";
+  const txt = d.verdict ? (d.verdict === "PASS" ? (d.flags.length ? "주의" : "통과") : VERDICT_TEXT[d.verdict] || d.verdict) : "아직";
+  const p = pill(cls, d.from + "→" + d.to + " " + txt);
+  p.title = d.verdict ? (d.reasons.concat(d.flags).join(" / ") || "문제 없음") : "아직 시험하지 않았어요";
+  return p;
+}
+
+function renderDrivePanel() {
+  const box = $("drive"); box.textContent = "";
+  const D = S.drive;
+  if (!D) return;
+  if (!D.available) {
+    box.appendChild(h("div", { class: "hint", text: "아직 주행 시험이 없어요. 시험 폴더를 만든 뒤(drive plan) 로봇으로 돌리고(drive run) 이 화면을 새로고침하면 결과가 보여요." }));
+    return;
+  }
+  const sum = h("div", { class: "sum" }, [
+    pill("", "시험 " + D.steps_done + "/" + D.steps_total + "칸"),
+    pill("ok", "통과 " + D.counts.OK), pill("warn", "주의 " + D.counts.WARN), pill("fail", "실패 " + D.counts.FAIL)]);
+  box.appendChild(sum);
+  if (D.labels_changed) box.appendChild(h("div", { class: "banner-inline hint", style: "color:var(--warn)",
+    text: "지금 점으로 만든 구간이 시험한 구간과 달라요. 결과는 지도에 그리지 않아요. 다시 시험해야 해요." }));
+  const tb = h("table", { class: "dt" });
+  tb.appendChild(h("tr", {}, [h("th", { text: "구간" }), h("th", { text: "양방향 결과" })]));
+  for (const e of D.edges) {
+    const td = h("td", {}); e.dirs.forEach((d) => { td.appendChild(lvPill(d)); td.appendChild(document.createTextNode(" ")); });
+    tb.appendChild(h("tr", {}, [h("td", { text: e.id }), td]));
+  }
+  box.appendChild(tb);
+  const row = h("div", { class: "row" });
+  const mk = h("button", { id: "propose", text: "조정 제안 만들기" });
+  mk.disabled = D.steps_done === 0 || D.labels_changed;
+  mk.addEventListener("click", () => driveCall(mk, "POST", "/api/drive/propose", {}));
+  row.appendChild(mk); box.appendChild(row);
+  box.appendChild(h("div", { class: "hint", text: "제안은 자동으로 적용되지 않아요. 승인한 것만 적용돼요." }));
+
+  const A = D.adjustments;
+  if (!A) return;
+  if (D.adjustments_stale) box.appendChild(h("div", { class: "hint", style: "color:var(--fail)",
+    text: "이 제안은 지금과 다른 점/지도로 만들어졌어요. 적용할 수 없어요. 다시 시험한 뒤 제안을 새로 만들어 주세요." }));
+  (A.notes || []).forEach((n) => box.appendChild(h("div", { class: "hint", text: n })));
+  if (!A.proposals.length) box.appendChild(h("div", { class: "hint", text: "제안할 조정이 없어요 (시험 결과가 모두 괜찮아요)." }));
+  for (const p of A.proposals) {
+    const where = p.kind === "shift_line" ? "구간 " + p.edges.join(", ") : "구간 " + p.edge;
+    const head = h("div", { text: p.id + " · " + KIND_TEXT[p.kind] + " · " + where +
+      (p.kind === "shift_line" ? " · x " + p.d[0] + " m, y " + p.d[1] + " m" : "") });
+    const box2 = h("div", { class: "prop " + (p.status === "approved" ? "approved" : p.status === "rejected" ? "rejected" : "") },
+      [head, h("div", { class: "hint", text: p.reason })]);
+    if (p.kind === "remove_edge" && p.loses.length)
+      box2.appendChild(h("div", { class: "hint", style: "color:var(--fail)", text: "빼면 갈 수 없게 되는 목적지: " + p.loses.join(", ") }));
+    if (p.kind !== "review_edge") {
+      const b = h("div", { class: "btns" });
+      const ok = h("button", { text: p.status === "approved" ? "승인됨 ✓" : "승인" });
+      const no = h("button", { text: p.status === "rejected" ? "거절됨" : "거절" });
+      const un = h("button", { text: "되돌리기" });
+      ok.disabled = D.adjustments_stale; ok.addEventListener("click", () => decide(p.id, "approved"));
+      no.addEventListener("click", () => decide(p.id, "rejected"));
+      un.addEventListener("click", () => decide(p.id, "proposed"));
+      [ok, no, un].forEach((x) => b.appendChild(x)); box2.appendChild(b);
+    }
+    box.appendChild(box2);
+  }
+  const nApproved = A.proposals.filter((p) => p.status === "approved").length;
+  const r2 = h("div", { class: "row" });
+  const prev = h("button", { id: "adjprev", class: "primary", text: S.adj ? "조정 전 화면으로" : "승인한 조정 적용해서 보기" });
+  prev.disabled = !S.adj && (!nApproved || D.adjustments_stale);
+  prev.addEventListener("click", () => S.adj ? (S.adj = null, renderAll()) : showAdjusted(prev));
+  r2.appendChild(prev);
+  const ex = h("button", { id: "adjexport", text: "조정본 내보내기" });
+  ex.disabled = !S.adj || S.adj.summary.FAIL > 0;
+  ex.addEventListener("click", () => exportAdjusted(ex));
+  r2.appendChild(ex); box.appendChild(r2);
+  if (S.adj) {
+    const R = S.adj, a = R.adjustments || { applied: [], rejected: [] };
+    box.appendChild(h("div", { class: "sum", style: "margin-top:8px" }, [
+      pill("ok", "OK " + R.summary.OK), pill("warn", "WARN " + R.summary.WARN), pill("fail", "FAIL " + R.summary.FAIL)]));
+    box.appendChild(h("div", { class: "hint", text: "점선 회색 = 시험한 원래 구간, 색 = 조정 후. 적용 " + a.applied.length + "개, 못 한 것 " + a.rejected.length + "개." }));
+    a.rejected.forEach((x) => box.appendChild(h("div", { class: "hint", style: "color:var(--warn)", text: x.id + ": " + x.reason })));
+    (R.excluded || []).forEach((x) => box.appendChild(h("div", { class: "hint", style: "color:var(--warn)", text: x.id + " 제외: " + x.reason })));
+    if (R.exported_to) box.appendChild(h("div", { class: "hint", text: "내보냈어요: " + R.exported_to + " (status: provisional)" }));
+  }
+}
+
+async function loadDrive() {
+  try { S.drive = await api("GET", "/api/drive"); } catch (e) { S.drive = null; banner("err", e.message); }
+  renderAll();
+}
+async function driveCall(btn, method, path, body) {
+  banner("", ""); btn.disabled = true;
+  try { await api(method, path, body); S.adj = null; } catch (e) { banner("err", e.message); }
+  await loadDrive();
+}
+async function decide(id, status) {
+  banner("", "");
+  try { await api("PUT", "/api/drive/decide", { decisions: { [id]: status } }); S.adj = null; }
+  catch (e) { banner("err", e.message); }
+  await loadDrive();
+}
+async function showAdjusted(btn) {
+  banner("", ""); btn.disabled = true;
+  try { S.adj = await api("POST", "/api/generate", { labels: labelsDoc(), adjusted: true }); }
+  catch (e) { banner("err", e.message); }
+  renderAll();
+}
+async function exportAdjusted(btn) {
+  banner("", ""); btn.disabled = true;
+  try { S.adj = await api("POST", "/api/export", { labels: labelsDoc(), adjusted: true });
+        banner("info", "내보냈어요: " + S.adj.exported_to); }
+  catch (e) { banner("err", e.message); }
+  renderAll();
+}
+
+// ------------------------------------------------------------------ actions
+async function run(path, btn) {
+  banner("", ""); btn.disabled = true;
+  try {
+    S.result = await api("POST", path, { labels: labelsDoc() });
+    S.stale = false; S.hsPose = null;
+  } catch (e) { banner("err", e.message); }
+  btn.disabled = false; renderAll();
+  if (path === "/api/export" && S.result && S.result.exported_to) banner("info", "내보냈어요: " + S.result.exported_to);
+}
+$("gen").addEventListener("click", () => run("/api/generate", $("gen")));
+$("export").addEventListener("click", () => run("/api/export", $("export")));
+$("clear").addEventListener("click", () => {
+  if (!S.labels.length || !confirm("찍은 점을 모두 지울까요?")) return;
+  S.labels = []; S.sel = null; S.result = null; S.stale = false; changed();
+});
+$("load-demo").addEventListener("click", async () => {
+  if (S.labels.length && !confirm("지금 점을 예시로 바꿀까요?")) return;
+  try { const d = await api("GET", "/api/example"); S.labels = d.labels; S.sel = null; S.result = null; changed(); }
+  catch (e) { banner("err", e.message); }
+});
+document.querySelectorAll("#tools button").forEach((b) => b.addEventListener("click", () => {
+  S.tool = b.dataset.tool;
+  document.querySelectorAll("#tools button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+  svg.classList.toggle("pan", S.tool === "move");
+  $("tableopts").style.display = S.tool === "table" ? "flex" : "none";
+}));
+
+// ------------------------------------------------------------------ pointer: click places, drag pans, wheel zooms
+let drag = null;
+svg.addEventListener("pointerdown", (ev) => {
+  svg.setPointerCapture(ev.pointerId);
+  drag = { x: ev.clientX, y: ev.clientY, vb: { ...S.vb }, moved: false };
+});
+svg.addEventListener("pointermove", (ev) => {
+  const w = toWorld(ev);
+  $("status").textContent = "x " + w.x.toFixed(2) + " m,  y " + w.y.toFixed(2) + " m";
+  if (!drag) return;
+  const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+  if (!drag.moved && Math.hypot(dx, dy) > 5) { drag.moved = true; }
+  if (drag.moved) {
+    S.vb.x = drag.vb.x - dx * S.px; S.vb.y = drag.vb.y - dy * S.px;
+    applyView();
+  }
+});
+svg.addEventListener("pointerup", (ev) => {
+  const d = drag; drag = null;
+  if (!d || d.moved) return;
+  const w = toWorld(ev);
+  const hit = pick(w);
+  if (hit) { S.sel = hit.id; renderAll(); return; }
+  if (S.tool !== "move") addLabel(S.tool, round(w.x), round(w.y));
+});
+svg.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  const w = toWorld(ev), k = ev.deltaY < 0 ? 1 / 1.2 : 1.2;
+  const nw = Math.min(Math.max(S.vb.w * k, 1), S.full.w * 1.5), f = nw / S.vb.w;
+  S.vb.x = w.x - (w.x - S.vb.x) * f; S.vb.y = -w.y - (-w.y - S.vb.y) * f;
+  S.vb.w = nw; S.vb.h = S.vb.h * f;
+  applyView();
+}, { passive: false });
+window.addEventListener("resize", applyView);
+
+function pick(w) {
+  let best = null, bd = 14 * (S.px || 0.02);       // 14 px
+  for (const l of S.labels) {
+    const d = Math.hypot(l.x_m - w.x, l.y_m - w.y);
+    if (d < bd) { best = l; bd = d; }
+  }
+  return best;
+}
+
+// ------------------------------------------------------------------ start
+(async function init() {
+  try {
+    S.map = await api("GET", "/api/map");
+    $("mapname").textContent = S.map.name + " · " + S.map.width_px + "×" + S.map.height_px + " px · " +
+      (S.map.resolution_m * 100) + " cm/px · map_revision " + S.map.map_revision;
+    const doc = await api("GET", "/api/labels");
+    S.labels = doc.labels || [];
+    $("tableopts").style.display = "none";
+    setupSvg(); renderAll(); loadDrive();
+    if (!S.labels.length) banner("info", "점이 없어요. 「예시 불러오기」로 데모 매장 점을 불러오거나, 직접 찍어 보세요.");
+  } catch (e) { banner("err", "시작하지 못했어요: " + e.message); }
+})();
+</script>
+</body>
+</html>

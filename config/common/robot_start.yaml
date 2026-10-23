@@ -1,0 +1,19 @@
+# Start pose of each robot, in the map frame.
+# Used for:
+#   - the Gazebo spawn pose            (operation_mode.launch.py mode:=sim)
+#   - the AMCL initial pose            (operation_mode.launch.py)
+#
+# `pose` is a destination name from waypoints.yaml (normally the robot's standby
+# pose), so the start pose is never typed twice. Alternatively give explicit
+# x / y / yaw_deg instead of `pose`.
+# On a real robot the start pose is usually unknown: launch with
+# use_start_pose:=false and set the pose from RViz ("2D Pose Estimate").
+schema_version: 1
+
+robot_01:
+  start_pose:
+    pose: standby_01
+
+robot_02:
+  start_pose:
+    pose: standby_02

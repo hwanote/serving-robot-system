@@ -1,0 +1,106 @@
+# Collision monitor: the last gate on the velocity command chain.
+#   velocity_smoother -> cmd_vel_smoothed -> collision_monitor -> cmd_vel_safe
+#       -> soft_stop_limiter -> /robot_01/cmd_vel
+# (topic names are also set in navigation.launch.py; keep them in sync)
+#
+# Step 3: three zones (distances measured from the body edge).
+#   HardStop  - always on: anything within hard_stop_distance_m of the robot
+#               body (any direction) stops the robot.
+#   StopZone  - only while driving forward: an obstacle within the stop
+#               distance (person_stop_distance_m) in front stops the robot.
+#   SlowZone  - only while driving forward: an obstacle within
+#               person_slow_distance_m in front caps the speed at
+#               slow_linear_mps. The stronger action wins when zones overlap.
+# Sources: HardStop reads the raw scan (anything close, walls too); StopZone and
+# SlowZone read scan_dynamic, so mapped walls and furniture do not stop or slow
+# the robot (it must be able to reach corner nodes next to walls).
+# Turning in place is never blocked or slowed by StopZone/SlowZone (tight
+# corners); only HardStop applies to it.
+# The polygon POINTS and the speed cap are not written here: navigation.launch.py
+# computes them from config/common/runtime_limits.yaml (distances, speeds) and
+# the footprint in nav2.yaml (body size), so no value is copied. This file alone
+# is therefore not enough to start the node; launch it through navigation.launch.py.
+collision_monitor:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel_safe"
+    state_topic: "collision_monitor_state"
+    transform_tolerance: 0.5
+    source_timeout: 5.0
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+    observation_sources: ["scan", "scan_dynamic"]
+    scan:                      # raw laser scan: everything, walls included
+      type: "scan"
+      topic: "/robot_01/scan"
+      enabled: true
+    scan_dynamic:              # scan without the known (mapped) obstacles
+      type: "scan"
+      topic: "/robot_01/scan_dynamic"
+      enabled: true
+
+    polygons: ["HardStop", "StopZone", "SlowZone"]
+
+    HardStop:
+      type: "polygon"
+      action_type: "stop"
+      min_points: 3
+      visualize: true
+      polygon_pub_topic: "hard_stop_polygon"
+      enabled: true
+      sources_names: ["scan"]
+
+    StopZone:
+      type: "velocity_polygon"
+      action_type: "stop"
+      min_points: 3
+      visualize: true
+      polygon_pub_topic: "stop_zone_polygon"
+      enabled: true
+      sources_names: ["scan_dynamic"]
+      holonomic: false
+      velocity_polygons: ["forward", "rotate", "reverse"]
+      forward:                 # driving forward: real stop zone
+        linear_min: 0.01
+        linear_max: 1.0
+        theta_min: -1.0
+        theta_max: 1.0
+      rotate:                  # turning in place or standing: tiny zone (never triggers)
+        linear_min: -0.01
+        linear_max: 0.01
+        theta_min: -1.0
+        theta_max: 1.0
+      reverse:                 # the design has no reversing: tiny zone
+        linear_min: -1.0
+        linear_max: -0.01
+        theta_min: -1.0
+        theta_max: 1.0
+
+    SlowZone:
+      type: "velocity_polygon"
+      action_type: "limit"     # linear_limit / angular_limit are set by the launch file
+      min_points: 3
+      visualize: true
+      polygon_pub_topic: "slow_zone_polygon"
+      enabled: true
+      sources_names: ["scan_dynamic"]
+      holonomic: false
+      velocity_polygons: ["forward", "rotate", "reverse"]
+      forward:
+        linear_min: 0.01
+        linear_max: 1.0
+        theta_min: -1.0
+        theta_max: 1.0
+      rotate:                  # turning in place or standing: tiny zone (never triggers)
+        linear_min: -0.01
+        linear_max: 0.01
+        theta_min: -1.0
+        theta_max: 1.0
+      reverse:                 # the design has no reversing: tiny zone
+        linear_min: -1.0
+        linear_max: -0.01
+        theta_min: -1.0
+        theta_max: 1.0

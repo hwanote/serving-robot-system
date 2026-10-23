@@ -1,0 +1,87 @@
+# Route graph + named destination poses (map frame, SI units).
+#
+# nodes  : places where the robot may stop and turn in place (corridor
+#          junctions and destinations).
+# edges  : STRAIGHT corridor segments between two nodes. The robot only drives
+#          straight lines and turns in place (no curves, no reversing).
+# poses  : named destinations. x/y come from the node; yaw_deg is the heading
+#          the robot takes when it arrives (0 = +x/east, 90 = +y/north).
+#
+# status: provisional (demo store). The validator checks every value against
+# the map and the furniture:  python3 scripts/validate_site_config.py
+schema_version: 1
+status: provisional
+authoring: manual
+frame_id: map
+
+nodes:
+  # west aisle (x = -3.2)
+  W_S: {x: -3.20, y: -2.40}   # south-west corner, robot standby
+  W_M: {x: -3.20, y: -0.40}
+  W_N: {x: -3.20, y: 1.55}
+  # north aisle (y = 1.55), in front of the counter
+  D:   {x: -2.30, y: 1.55}    # kitchen / counter pickup
+  C_N: {x: 0.00, y: 1.55}
+  E_N: {x: 3.00, y: 1.55}
+  # middle aisle between the two table rows (y = -0.40)
+  T13: {x: -1.60, y: -0.40}   # serves table_01 (north) and table_03 (south)
+  C_M: {x: 0.00, y: -0.40}
+  T24: {x: 1.55, y: -0.40}    # serves table_02 (north) and table_04 (south)
+  E_M: {x: 3.00, y: -0.40}
+  # south aisle (y = -2.40) and centre aisle (x = 0.0)
+  C_S: {x: 0.00, y: -2.40}
+
+edges:
+  - {id: e_west_s,   from: W_S, to: W_M, zone: aisle_west}
+  - {id: e_west_n,   from: W_M, to: W_N, zone: aisle_west}
+  - {id: e_south,    from: W_S, to: C_S, zone: aisle_south}
+  - {id: e_north_a,  from: W_N, to: D,   zone: aisle_north}
+  - {id: e_north_b,  from: D,   to: C_N, zone: aisle_north}
+  - {id: e_north_c,  from: C_N, to: E_N, zone: aisle_north}
+  - {id: e_mid_a,    from: W_M, to: T13, zone: aisle_middle}
+  - {id: e_mid_b,    from: T13, to: C_M, zone: aisle_middle}
+  - {id: e_mid_c,    from: C_M, to: T24, zone: aisle_middle}
+  - {id: e_mid_d,    from: T24, to: E_M, zone: aisle_middle}
+  - {id: e_center_s, from: C_S, to: C_M, zone: aisle_center}
+  - {id: e_center_n, from: C_M, to: C_N, zone: aisle_center}
+  - {id: e_east,     from: E_M, to: E_N, zone: aisle_east}
+
+# kind: standby | pickup | table_service
+# `faces` (validator): the thing the robot looks at on arrival.
+poses:
+  standby_01:
+    node: W_S
+    yaw_deg: 0.0
+    kind: standby
+    aliases: [wait_01, home]
+  standby_02:
+    node: C_N
+    yaw_deg: 180.0
+    kind: standby
+    aliases: [wait_02]
+  kitchen:
+    node: D
+    yaw_deg: 90.0
+    kind: pickup
+    faces: {fixture: counter}
+    aliases: [desk]
+  table_01:
+    node: T13
+    yaw_deg: 90.0
+    kind: table_service
+    faces: {table: table_01}
+  table_02:
+    node: T24
+    yaw_deg: 90.0
+    kind: table_service
+    faces: {table: table_02}
+  table_03:
+    node: T13
+    yaw_deg: -90.0
+    kind: table_service
+    faces: {table: table_03}
+  table_04:
+    node: T24
+    yaw_deg: -90.0
+    kind: table_service
+    faces: {table: table_04}
