@@ -43,6 +43,9 @@ export const ENTITY_TYPE_LABEL: Record<EntityType, string> = {
   robot_wait: '로봇 대기 위치',
 }
 
+/** 구역(전용·진입 금지·감속)은 편집 초안에만 저장되고 로봇 동작에는 아직 반영되지 않는다. */
+export const ZONE_NOT_APPLIED_NOTE = '구역은 지금 저장만 되고 로봇 동작에는 아직 반영되지 않아요.'
+
 export const ZONE_TYPE_LABEL: Record<ZoneType, string> = {
   exclusive: '전용 구역',
   no_go: '진입 금지',

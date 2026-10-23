@@ -51,6 +51,23 @@ describe('Map Setup 화면', () => {
     expect(screen.getByText('저장됨')).toBeInTheDocument()
   })
 
+  it('구역 도구에는 "준비 중" 표시가 있고, 구역을 고르면 미적용 안내가 나온다', async () => {
+    seedMockDb()
+    const user = userEvent.setup()
+    renderApp('/map')
+    const slow = await screen.findByRole('button', { name: /Slow Zone/ })
+    expect(slow).toHaveTextContent('준비 중')
+    expect(screen.getByRole('button', { name: /Exclusive Zone/ })).toHaveTextContent('준비 중')
+    expect(screen.getByRole('button', { name: /No-Go Zone/ })).toHaveTextContent('준비 중')
+    expect(screen.getByRole('button', { name: /Add Table/ })).not.toHaveTextContent('준비 중')
+
+    await user.click(slow)
+    expect(screen.getByText(/로봇 동작에는 아직 반영되지 않아요/)).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: /zone_no_go_01/ }))
+    expect(screen.getByRole('note')).toHaveTextContent('로봇 동작에는 아직 반영되지 않아요')
+  })
+
   it('지도 revision 이 바뀌면 "갱신 필요" 로 표시하고 저장을 막는다', async () => {
     seedMockDb()
     mockDb.rawMap = { ...mockDb.rawMap!, map_revision: mockDb.rawMap!.map_revision + 1 }

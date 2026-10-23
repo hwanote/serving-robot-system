@@ -1,6 +1,6 @@
 import type { Dispatch } from 'react'
 import type { EntityType, ZoneType } from '../../types/contracts'
-import { ENTITY_TYPE_LABEL } from '../../utils/labels'
+import { ENTITY_TYPE_LABEL, ZONE_NOT_APPLIED_NOTE } from '../../utils/labels'
 import type { EditorAction, EditorState, EditorTool } from '../../utils/semanticEditor'
 import { Icon } from '../common/Icon'
 import { ENTITY_STYLE, WAYPOINT_COLOR, ZONE_STYLE } from './mapStyles'
@@ -72,9 +72,9 @@ export function EditorToolbar({ state, dispatch, disabled }: Props) {
           chip(
             `zone_${t.type}`,
             <>
-              <span className="swatch" style={{ background: ZONE_STYLE[t.type].color, opacity: 0.7 }} /> {t.label}
+              <span className="swatch" style={{ background: ZONE_STYLE[t.type].color, opacity: 0.7 }} /> {t.label} <span className="chip-soon">준비 중</span>
             </>,
-            '지도를 클릭해 꼭짓점 지정, Enter 또는 첫 점 클릭으로 완료',
+            `지도를 클릭해 꼭짓점 지정, Enter 또는 첫 점 클릭으로 완료 — ${ZONE_NOT_APPLIED_NOTE}`,
           ),
         )}
       </div>

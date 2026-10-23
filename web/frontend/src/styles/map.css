@@ -388,3 +388,23 @@
     overflow: visible;
   }
 }
+
+/* 구역 도구: 아직 로봇 동작에 반영되지 않음을 알리는 표시 */
+.chip-soon {
+  margin-left: 2px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: #edf0f3;
+  color: var(--text-2);
+}
+
+.zone-soon-note {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: #fff6e0;
+  color: #7a5a00;
+}

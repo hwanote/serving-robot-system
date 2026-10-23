@@ -1,7 +1,7 @@
 import { useState, type Dispatch } from 'react'
 import { ZONE_TYPES, type SemanticMap } from '../../types/contracts'
 import { roundTo } from '../../utils/coordinates'
-import { ENTITY_TYPE_LABEL, ZONE_TYPE_LABEL } from '../../utils/labels'
+import { ENTITY_TYPE_LABEL, ZONE_NOT_APPLIED_NOTE, ZONE_TYPE_LABEL } from '../../utils/labels'
 import { entityDisplayPose, isValidTopSize, mmToM, mToMm, TOP_SIZE_MAX_M, waypointForEntity } from '../../utils/semantic'
 import type { EditorAction, Selection } from '../../utils/semanticEditor'
 import { Icon } from '../common/Icon'
@@ -217,6 +217,9 @@ export function Inspector({ doc, selection, dispatch }: { doc: SemanticMap; sele
           ))}
         </select>
       </label>
+      <p className="zone-soon-note" role="note">
+        {ZONE_NOT_APPLIED_NOTE}
+      </p>
       <div style={{ maxHeight: 150, overflow: 'auto' }}>
         <table className="table mono" style={{ fontSize: 12 }}>
           <thead>

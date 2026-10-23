@@ -16,7 +16,7 @@ import { useSemanticEditor } from '../hooks/useSemanticEditor'
 import { useStoreData } from '../state/storeDataContext'
 import { useToast } from '../state/toastContext'
 import type { Vec2 } from '../utils/coordinates'
-import { ENTITY_TYPE_LABEL, ZONE_TYPE_LABEL } from '../utils/labels'
+import { ENTITY_TYPE_LABEL, ZONE_NOT_APPLIED_NOTE, ZONE_TYPE_LABEL } from '../utils/labels'
 import { entityDisplayPose } from '../utils/semantic'
 import { toolEntityType, toolZoneType, type EditorTool } from '../utils/semanticEditor'
 
@@ -28,7 +28,7 @@ function toolHint(tool: EditorTool, draftCount: number, selectedEntity: string |
   if (entityType) return `지도를 클릭해 ${ENTITY_TYPE_LABEL[entityType]}를 추가합니다. (Esc: 선택 도구)`
   const zoneType = toolZoneType(tool)
   if (zoneType) {
-    if (draftCount === 0) return `${ZONE_TYPE_LABEL[zoneType]}: 지도를 클릭해 첫 꼭짓점을 지정하세요.`
+    if (draftCount === 0) return `${ZONE_TYPE_LABEL[zoneType]}: 지도를 클릭해 첫 꼭짓점을 지정하세요. (${ZONE_NOT_APPLIED_NOTE})`
     if (draftCount < 3) return `꼭짓점 ${draftCount}개 — 최소 3개 필요 (Backspace: 마지막 점 취소, Esc: 취소)`
     return `꼭짓점 ${draftCount}개 — 첫 점 클릭 또는 Enter로 완료`
   }
