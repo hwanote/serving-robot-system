@@ -1,0 +1,36 @@
+map_yaml: maps/stores/demo_store/team_lidar_initial.yaml
+limits_file: config/integration/runtime_limits.yaml
+waypoints_file: config/integration/waypoints.yaml
+zones_file: config/integration/zones.yaml
+http_port: 8765
+database_path: _local_only/evidence/fleet.sqlite3
+perception:
+  weights: _local_only/models/yolo11n.pt
+  camera_hz: 5.0
+  timeout_s: 3.0
+  mount_z: 0.9
+  horizontal_fov: 2.0943951023931953
+  front_hz: 10.0
+  rear_hz: 5.0
+robots:
+  robot_01:
+    x: -3.2
+    y: -2.25
+    yaw: 0.0
+    map_x: 0.0
+    map_y: 0.0
+    map_yaw: 0.0
+  robot_02:
+    x: 2.4
+    y: -2.25
+    yaw: 3.141592653589793
+    map_x: 5.6
+    map_y: 0.0
+    map_yaw: 3.141592653589793
+nav2_files:
+  robot_01: config/integration/nav2_robot_01.yaml
+  robot_02: config/integration/nav2_robot_02.yaml
+world_to_map:
+  x: 3.2
+  y: 2.25
+  yaw: 0.0

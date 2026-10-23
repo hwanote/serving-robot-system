@@ -1,0 +1,24 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cafe Autonomy Control</title>
+<style>body{font:15px system-ui, sans-serif;max-width:980px;margin:26px auto;padding:0 16px;color:#17212d}h1{font-size:24px}h2{font-size:18px;margin-top:32px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}article{border:1px solid #ddd;padding:16px;border-radius:9px}button,select,input{padding:9px;margin:4px}button{cursor:pointer}pre{background:#f3f3f3;padding:12px;overflow:auto;white-space:pre-wrap}small{color:#555}
+</style></head><body><h1>Cafe Autonomy | Robot 01 + Robot 02</h1><p>로컬 대시보드. ROS 상태의 실제 응답을 표시하며 성공을 추정하지 않습니다.</p>
+<div class="grid"><article><b>Robot 01</b><pre id="r1">연결 확인 중</pre></article><article><b>Robot 02</b><pre id="r2">연결 확인 중</pre></article></div>
+<h2>주문 요청</h2><label>로봇 <select id="robot"><option value="">자동 배차</option><option>robot_01</option><option>robot_02</option></select></label>
+<label>테이블 <select id="table"><option>table_01</option><option>table_02</option><option>table_03</option><option>table_04</option></select></label>
+<label>방식 <select id="mode"><option>KITCHEN_PICKUP</option><option>DELIVER_DIRECT</option><option>TABLE_COLLECT</option><option>GO_KITCHEN</option><option>GO_HOME</option></select></label>
+<button id="submit" onclick="submitOrder()">요청 접수 / 재시도</button><button onclick="newRequest()">새 요청 ID</button>
+<h2>진행 중인 요청</h2><pre id="orders">조회 중</pre>
+<label>요청 ID <input id="rid" size="36" placeholder="주문에서 자동 채움"></label>
+<button onclick="signal('LOAD','kitchen')">음식 적재</button><button onclick="signal('COMPLETE','table')">수령 완료</button><button onclick="signal('COLLECTED','table')">회수 완료</button><button onclick="signal('CANCEL','operator')">취소</button><button onclick="signal('RECOVER','operator')">미션 복구</button><button onclick="resetRobot()">선택 로봇 RESET</button>
+<h2>서버 응답</h2><pre id="reply">명령 대기</pre>
+<p><small>완료 신호는 현재 위치와 WAIT_LOAD / WAIT_HANDOVER 상태를 확인합니다. 완료 후 제자리에 대기합니다. 후속 HOME·부엌 이동은 새 요청으로 접수하세요. /health 및 /api/history 제공.</small></p>
+<script>
+async function api(path,opt){let res=await fetch(path,opt);return await res.json()}
+async function req(body){try{let data=await api('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});document.getElementById('reply').textContent=JSON.stringify(data,null,2);return data}catch(e){document.getElementById('reply').textContent=String(e)}}
+function newRequest(){document.getElementById('rid').value='web-'+crypto.randomUUID();localStorage.setItem('teamRequestId',document.getElementById('rid').value)}
+async function submitOrder(){let button=document.getElementById('submit');if(button.disabled)return;button.disabled=true;try{let input=document.getElementById('rid');if(!input.value)newRequest();let id=input.value;localStorage.setItem('teamRequestId',id);await req({action:'SUBMIT',request_id:id,robot_id:document.getElementById('robot').value,table:document.getElementById('table').value,mode:document.getElementById('mode').value})}finally{button.disabled=false}}
+async function signal(action,source){let id=document.getElementById('rid').value.trim();if(id)await req({action,request_id:id,source})}
+async function resetRobot(){let robot=document.getElementById('robot').value;if(robot)await req({action:'RESET',robot_id:robot})}
+async function update(){try{let s=await api('/api/status'); for(let [id,elt] of [['robot_01','r1'],['robot_02','r2']]){document.getElementById(elt).textContent=JSON.stringify({supervisor:s.supervisors?.[id],traffic_hold:s.traffic_hold?.[id],pose:s.robot_poses?.[id],safety:s.safety?.[id],dynamic:s.dynamic?.[id],last_dynamic_event:s.dynamic_events?.[id],last_navigation_event:s.navigation_events?.[id]},null,2)} document.getElementById('orders').textContent=JSON.stringify({active:s.active,queued:s.queued,requests:s.requests,last_error:s.last_error,zones:s.zone_owner,recovery:s.recovery},null,2)}catch(e){document.getElementById('orders').textContent='연결 실패: '+e}}
+document.getElementById('rid').value=localStorage.getItem('teamRequestId')||'';update();setInterval(update,1000)
+</script></body></html>

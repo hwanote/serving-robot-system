@@ -1,0 +1,15 @@
+# OPTIONAL overlay for the person simulator manager (ROS parameter overlay_config_path).
+# NEW file: policy.yaml / policy_dual.yaml are unchanged. Without this overlay the manager
+# behaves exactly like the 2026-10-22 version (deadlock resolution OFF).
+#
+# Only these two keys are accepted; any other key is rejected at startup.
+#
+# person_deadlock_timeout_s : TEMPORARY value (approved 2026-10-23), revisit after Gazebo checks.
+#   Seconds a person must be blocked ONLY by person-person rules before the lowest-id such
+#   person within 2 m may receive a limited "pass" (max 3 x this value, then it expires).
+# person_hard_min_radius_m  : TEMPORARY internal criterion of the deadlock breaker ONLY.
+#   While holding a pass a person keeps >= this distance (> body diameter 0.44 m) from other
+#   people. It does NOT replace person_stop/release radii (0.80/1.00 m) or the robot radii
+#   (0.85/1.05 m), which stay as configured and are never relaxed.
+person_deadlock_timeout_s: 10.0
+person_hard_min_radius_m: 0.50
