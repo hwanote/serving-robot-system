@@ -4,7 +4,10 @@
     <RecoveryNode number_of_retries="1" name="Navigation">
       <PipelineSequence name="ReplanAndFollow">
         <RateController hz="1.0">
-          <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+          <Fallback name="PlanForwardThenGrid">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="ForwardPath"/>
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+          </Fallback>
         </RateController>
         <FollowPath path="{path}" controller_id="FollowPath"/>
       </PipelineSequence>

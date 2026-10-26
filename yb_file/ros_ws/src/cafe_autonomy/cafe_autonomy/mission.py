@@ -37,6 +37,7 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
         self.declare_parameter('runtime_limits_file','')
         self.limits=load_limits(self.get_parameter('runtime_limits_file').value)
         self.xy_tolerance=self.limits['arrival']['xy_tolerance_m']
+        self.fine_control_xy_target=self.limits['arrival'].get('control_xy_target_m',self.xy_tolerance)
         self.yaw_tolerance=self.limits['arrival']['yaw_tolerance_rad']
         self.fine_engage_max=self.limits['arrival']['fine_engage_max_m']
         self.fine_timeout=self.limits['arrival']['fine_timeout_s']
@@ -57,10 +58,10 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
         self.create_subscription(Bool,'traffic_hold',self.set_hold,10)
         self.create_subscription(Odometry,'odom',self.on_odom,10)
         self.hold=True;self.odom=None;self.replan_pending=False;self.replan_count=0
-        self.history=deque();self.nav_started=0.;self.cancel_requested=False;self.precision_pending=False;self.yield_pending=False;self.yield_saved=None;self.pause_pending=False;self.paused_nav=False
+        self.history=deque();self.nav_started=0.;self.cancel_requested=False;self.precision_pending=False;self.yield_pending=False;self.yield_saved=None;self.yield_pose=None;self.pause_pending=False;self.paused_nav=False
         self.state='IDLE';self.request_id=None;self.mode=None;self.table=None;self.side='auto'
         self.rotation_status={};self.target_name=None;self.target=None;self.goal_handle=None;self.goal_pending=False
-        self.goal_seq=0;self.fine=False;self.fine_since=0.;self.fail_reason=None
+        self.goal_seq=0;self.fine=False;self.fine_aligning=False;self.fine_since=0.;self.fail_reason=None
         self.init_dynamic_mission()
         self.arrival_settle_since=None;self.forward_curve_goal=False;self.recovery_switch_pending=False
         self.init_goal_recovery()
@@ -135,9 +136,17 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
                 self.emit('RECOVERY_REQUESTED');return
             if command=='YIELD':
                 if self.yield_saved or self.fine:return
+                if v.get('robot_id')!=self.robot or v.get('request_id')!=self.request_id:return
+                pose=v.get('pose')
+                if not isinstance(pose,(list,tuple)) or len(pose)!=3 or not all(isinstance(p,(float,int)) and math.isfinite(p) for p in pose):
+                    self.emit('YIELD_REJECTED',reason='Missing verified parking pose');return
+                home=self.poses[self.robot+'_HOME']
+                if distance(pose,(home['x'],home['y']))<self.limits['fleet']['robot_separation_m']:
+                    self.emit('YIELD_REJECTED',reason='HOME is not a traffic parking pose');return
+                self.yield_pose=tuple(pose)
                 if self.paused_nav:
                     self.yield_saved=(self.target_name,self.state,self.target);self.paused_nav=False
-                    self.start_goal(self.robot+'_HOME','YIELDING');self.emit('YIELD_RETREAT_STARTED');return
+                    self.start_goal('FLEET_YIELD','YIELDING',self.yield_pose);self.emit('YIELD_RETREAT_STARTED');return
                 if not self.goal_handle:return
                 self.yield_saved=(self.target_name,self.state,self.target);self.yield_pending=True
                 self.goal_handle.cancel_goal_async();self.emit('YIELD_CANCEL_REQUEST');return
@@ -204,14 +213,14 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
         goal=({'x':pose_override[0],'y':pose_override[1],'yaw':pose_override[2]} if pose_override else choose_waypoint(self.poses,name,here[:2] if here else None,self.side if name==self.table else 'auto'))
         self.target_name=name
         self.target=(goal['x'],goal['y'],goal['yaw'])
-        self.state=new_state;self.nav_started=time.monotonic();self.history.clear();self.cancel_requested=False
+        self.state=new_state;self.nav_started=time.monotonic();self.history.clear();self.cancel_requested=False;self.fine_aligning=False
         g=NavigateToPose.Goal();g.pose.header.frame_id='map'
         g.pose.header.stamp=self.get_clock().now().to_msg()
         g.pose.pose.position.x=goal['x'];g.pose.pose.position.y=goal['y']
         g.pose.pose.orientation.z=math.sin(goal['yaw']/2)
         g.pose.pose.orientation.w=math.cos(goal['yaw']/2)
         heading=abs(norm_angle(math.atan2(goal['y']-here[1],goal['x']-here[0])-here[2])) if here else 0.
-        remaining=self.limits['navigation']['cumulative_rotation_rad']-self.rotation_status.get('cumulative_rad',0.)
+        remaining=self.limits['navigation']['continuous_rotation_rad']-self.rotation_status.get('continuous_rad',0.)
         self.forward_curve_goal=new_state in ('RETURNING_HOME','GOING_KITCHEN') or heading+.15>=remaining or self.recovery_reason=='ROTATION_LIMIT_FORWARD_PATH'
         if self.forward_curve_goal:
             from ament_index_python.packages import get_package_share_directory
@@ -257,8 +266,11 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
             if status!=GoalStatus.STATUS_SUCCEEDED:self.fail('TRAFFIC_PAUSE_FAILED','Nav2 cancellation failed');return
         if self.yield_pending:
             self.yield_pending=False
-            if status!=GoalStatus.STATUS_CANCELED:self.fail('YIELD_CANCEL_FAILED','Cancellation not acknowledged');return
-            self.start_goal(self.robot+'_HOME','YIELDING');self.emit('YIELD_RETREAT_STARTED');return
+            if status==GoalStatus.STATUS_CANCELED:
+                self.start_goal('FLEET_YIELD','YIELDING',self.yield_pose);self.emit('YIELD_RETREAT_STARTED');return
+            if status==GoalStatus.STATUS_SUCCEEDED:
+                self.yield_saved=None;self.yield_pose=None;self.emit('YIELD_SKIPPED_GOAL_SUCCEEDED')
+            else:self.fail('YIELD_CANCEL_FAILED','Cancellation not acknowledged');return
         if self.precision_pending:
             self.precision_pending=False
             if status!=GoalStatus.STATUS_CANCELED:self.fail('PRECISION_CANCEL_FAILED','Nav2 cancel not acknowledged');return
@@ -310,7 +322,7 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
 
     def cancel(self):
         self.cancel_dynamic_planning()
-        self.cancel_requested=True;self.replan_pending=False;self.pause_pending=False;self.paused_nav=False;self.precision_pending=False;self.yield_pending=False;self.yield_saved=None
+        self.cancel_requested=True;self.replan_pending=False;self.pause_pending=False;self.paused_nav=False;self.precision_pending=False;self.yield_pending=False;self.yield_saved=None;self.yield_pose=None
         if self.goal_handle is not None:self.goal_handle.cancel_goal_async()
         self.fine=False;self.fine_pub.publish(Twist());self.fine_active.publish(Bool(data=False))
         self.state='CANCELING' if self.goal_handle or self.goal_pending else 'CANCELED'
@@ -324,7 +336,7 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
         if moving and p and not self.hold:
             err=self.pose_error()
             fine_turn=max(abs(err[1]),abs(norm_angle(math.atan2(self.target[1]-p[1],self.target[0]-p[0])-p[2])) if err and err[0]>self.xy_tolerance else 0.) if err else float('inf')
-            rotation_remaining=self.limits['navigation']['cumulative_rotation_rad']-self.rotation_status.get('cumulative_rad',0.)
+            rotation_remaining=self.limits['navigation']['continuous_rotation_rad']-self.rotation_status.get('continuous_rad',0.)
             if err and err[0]<=self.fine_engage_max and fine_turn+.08<rotation_remaining and self.goal_handle and not self.precision_pending:
                 self.precision_pending=True;self.goal_handle.cancel_goal_async()
             elif err and err[0]<=self.fine_engage_max and not self.forward_curve_goal and self.goal_handle and not (self.recovery_switch_pending or self.precision_pending or self.pause_pending):
@@ -336,8 +348,12 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
             while self.history and policy_now-self.history[0][0]>self.limits['navigation']['stuck_window_s']+1.:self.history.popleft()
             if len(self.history)>2 and policy_now-self.history[0][0]>=self.limits['navigation']['stuck_window_s']:
                 drift=max(math.hypot(v[1]-self.history[0][1],v[2]-self.history[0][2]) for v in self.history)
-                if drift<self.limits['navigation']['stuck_distance_m']:
-                    self.fail('DRIVING_STUCK_20S','Less than 8cm displacement during 20s of permitted driving')
+                if drift<self.limits['navigation']['stuck_distance_m'] and self.rotation_status.get('cumulative_watch') and not self.fine:
+                    if self.goal_handle and not self.forward_curve_goal and not (self.recovery_switch_pending or self.precision_pending or self.pause_pending):
+                        self.recovery_switch_pending=True;self.recovery_reason='ROTATION_LIMIT_FORWARD_PATH'
+                        self.goal_handle.cancel_goal_async();self.emit('EXCESSIVE_ROTATION_RECOVERY_REQUEST',cumulative_rad=self.rotation_status.get('cumulative_rad'))
+                    elif self.forward_curve_goal and not self.recovery_switch_pending:
+                        self.fail('DRIVING_STUCK_ROTATION_20S','Less than 8cm displacement and at least 270 degrees rotation in 20s')
             if now-self.nav_started>self.limits['navigation']['goal_timeout_s']:self.fail('NAV_TIMEOUT','Configured goal timeout exceeded')
         else:self.history.clear()
         self.fine_active.publish(Bool(data=bool(self.fine)))
@@ -357,7 +373,12 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
             self.fine_pub.publish(Twist());return
         tx,ty,ta=self.target;x,y,yaw_now=p
         d=math.hypot(tx-x,ty-y);eyaw=norm_angle(ta-yaw_now)
-        if d<=self.xy_tolerance and abs(eyaw)<=self.limits['arrival']['control_yaw_target_rad']:
+        # Once within the 4 cm control target, finish yaw alignment while the
+        # existing 10 cm acceptance remains valid; map jitter must not reverse
+        # the turn toward the position target on every tick.
+        if d<=self.fine_control_xy_target:self.fine_aligning=True
+        elif d>self.xy_tolerance:self.fine_aligning=False
+        if self.fine_aligning and d<=self.xy_tolerance and abs(eyaw)<=self.limits['arrival']['control_yaw_target_rad']:
             self.fine_pub.publish(Twist())
             still=self.odom and abs(self.odom.twist.twist.linear.x)<=self.limits['arrival']['settle_linear_mps'] and abs(self.odom.twist.twist.angular.z)<=self.limits['arrival']['settle_angular_rps']
             if still:
@@ -370,7 +391,7 @@ class Mission(DynamicMissionMixin,GoalRecoveryMixin,Node):
         cmd=Twist()
         if self.hold:
             self.fine_pub.publish(cmd);return
-        if d>self.xy_tolerance:
+        if not self.fine_aligning:
             heading=math.atan2(ty-y,tx-x)
             turn=norm_angle(heading-yaw_now)
             if abs(turn)>0.12:

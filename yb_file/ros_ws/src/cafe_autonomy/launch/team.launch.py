@@ -19,6 +19,8 @@ def setup(context):
     c=yaml.safe_load(cfg.read_text())
     mode=LaunchConfiguration('mode').perform(context)
     if mode not in ('mapping','operation'):raise ValueError('mode must be mapping or operation')
+    selected_robot=LaunchConfiguration('robot').perform(context)
+    if selected_robot and selected_robot not in c['robots']:raise ValueError('Unknown robot: '+selected_robot)
     p=Path(share('cafe_autonomy'))
     world=Path(share('serving_robot_gazebo'))/'worlds/cafe.world.sdf'
     args='-r -v3 '+str(world)
@@ -29,10 +31,16 @@ def setup(context):
     loader=Node(package='cafe_autonomy',executable='contact_loader',name='contact_system_loader',output='screen')
     spawns=[]
     for r,pose in c['robots'].items():
+        if selected_robot and r!=selected_robot:continue
         if mode=='mapping' and r!='robot_01':continue
         tree=ET.fromstring(xacro.process_file(str(Path(share('serving_robot_description'))/'urdf/serving_robot.urdf.xacro'),mappings={'robot_name':r}).toxml())
+        effective_track=c.get('diff_drive_effective_wheel_separation_m') if mode=='operation' else None
+        if effective_track is not None and float(effective_track)<=0:
+            raise ValueError('Effective wheel separation must be positive')
         for plugin in tree.findall('.//plugin'):
             if 'DiffDrive' in plugin.attrib.get('name',''):
+                if effective_track is not None:
+                    plugin.find('wheel_separation').text=str(float(effective_track))
                 for tag,text in [('topic',f'/model/{r}/cmd_vel'),('odom_topic',f'/model/{r}/odometry'),('tf_topic',f'/model/{r}/tf'),('frame_id',r+'/odom'),('child_frame_id',r+'/base_footprint')]:
                     elem=plugin.find(tag)
                     if elem is None:elem=ET.SubElement(plugin,tag)
@@ -95,11 +103,20 @@ def setup(context):
                         n('lifecycle_manager','nav2_lifecycle_manager',[{'use_sim_time':True,'autostart':True,'node_names':['slam_toolbox']}],'lifecycle_manager_mapping')]
             continue
         params=c['nav2_files'][r]
-        actions.append(n('zone_masks',params=[{'use_sim_time':True,'map_yaml':c['map_yaml'],'zones_file':c['zones_file']}]))
+        actions.append(n('zone_masks',params=[{'use_sim_time':True,'map_yaml':c['map_yaml'],'zones_file':c['zones_file'],'robot_id':r}]))
         actions.append(n('zone_speed',params=[{'use_sim_time':True,'robot_id':r,'zones_file':c['zones_file']}]))
         actions.append(n('dynamic_obstacles',params=[{'use_sim_time':True,'robot_id':r,'runtime_limits_file':c['limits_file'],'log_directory':str(cfg.parents[2]/'_local_only/dynamic'),'static_world_file':str(world),'alignment_x':c['world_to_map']['x'],'alignment_y':c['world_to_map']['y'],'alignment_yaw':c['world_to_map']['yaw']}]))
+        guard=c.get('localization_guard',{})
+        guarded=bool(guard.get('enabled',False))
+        if guarded:
+            actions.append(n('map_odom_guard',params=[{
+                'use_sim_time':True,'robot_id':r,
+                'initial_map_x':pose['map_x'],'initial_map_y':pose['map_y'],
+                'initial_map_yaw':pose['map_yaw'],
+                'known_radius_m':guard['known_radius_m'],
+                'min_known_fraction':guard['min_known_fraction']}]))
         actions += [n('map_server','nav2_map_server',[params,{'yaml_filename':c['map_yaml']}]),
-                    n('amcl','nav2_amcl',[params,{'set_initial_pose':True,'initial_pose.x':pose['map_x'],'initial_pose.y':pose['map_y'],'initial_pose.yaw':pose['map_yaw']}])]
+                    n('amcl','nav2_amcl',[params,{'set_initial_pose':True,'initial_pose.x':pose['map_x'],'initial_pose.y':pose['map_y'],'initial_pose.yaw':pose['map_yaw'],'tf_broadcast':not guarded}])]
         for exe,package in [('planner_server','nav2_planner'),('controller_server','nav2_controller'),('behavior_server','nav2_behaviors'),('bt_navigator','nav2_bt_navigator'),('velocity_smoother','nav2_velocity_smoother'),('collision_monitor','nav2_collision_monitor')]:
             ps=[params]
             if exe=='bt_navigator':ps.append({'default_nav_to_pose_bt_xml':str(p/'config/navigate_no_reverse.xml')})
@@ -112,7 +129,7 @@ def setup(context):
                     n('rgbd_people',params=[{'use_sim_time':True,'robot_id':r,'weights':c['perception']['weights'],'timeout_s':c['perception']['timeout_s']}])]
     if mode=='operation':
         actions += [Node(package='serving_robot_gazebo',executable='gazebo_truth_evidence',name='gazebo_truth_evidence'),
-                    Node(package='cafe_autonomy',executable='fleet',name='cafe_fleet',respawn=True,respawn_delay=2.,parameters=[{'use_sim_time':True,'http_port':c['http_port'],'database_path':c['database_path'],'runtime_limits_file':c['limits_file'],'zones_file':c['zones_file']}],output='screen'),
+                    Node(package='cafe_autonomy',executable='fleet',name='cafe_fleet',respawn=True,respawn_delay=2.,parameters=[{'use_sim_time':True,'http_port':c['http_port'],'database_path':c['database_path'],'runtime_limits_file':c['limits_file'],'zones_file':c['zones_file'],'waypoints_file':c['waypoints_file']}],output='screen'),
                     Node(package='cafe_autonomy',executable='metrics',name='cafe_metrics',parameters=[{'use_sim_time':True,'log_directory':str(cfg.parents[2]/'_local_only/metrics'),'alignment_x':c['world_to_map']['x'],'alignment_y':c['world_to_map']['y'],'alignment_yaw':c['world_to_map']['yaw']}],output='screen')]
     def after_contact(event,context):
         return spawns if event.returncode==0 else [LogInfo(msg='Contact system failed; stopping bringup'),Shutdown(reason='Contact system unavailable')]
@@ -121,4 +138,4 @@ def setup(context):
 
 
 def generate_launch_description():
-    return LaunchDescription([DeclareLaunchArgument('config'),DeclareLaunchArgument('mode',default_value='operation'),DeclareLaunchArgument('gui',default_value='true'),OpaqueFunction(function=setup)])
+    return LaunchDescription([DeclareLaunchArgument('config'),DeclareLaunchArgument('mode',default_value='operation'),DeclareLaunchArgument('gui',default_value='true'),DeclareLaunchArgument('robot',default_value=''),OpaqueFunction(function=setup)])

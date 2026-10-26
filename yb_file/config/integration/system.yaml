@@ -34,3 +34,9 @@ world_to_map:
   x: 3.2
   y: 2.25
   yaw: 0.0
+
+diff_drive_effective_wheel_separation_m: 0.317
+localization_guard:
+  enabled: true
+  known_radius_m: 0.75
+  min_known_fraction: 0.2

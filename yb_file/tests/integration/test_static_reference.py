@@ -1,7 +1,7 @@
 from pathlib import Path
 import sys,math,numpy as np
 root=Path(__file__).resolve().parents[2];sys.path.insert(0,str(root/'ros_ws/src/cafe_autonomy'))
-from cafe_autonomy.static_reference import register_static,closest
+from cafe_autonomy.static_reference import register_static,closest,static_echo
 
 def test_static_matching_handles_pose_error_without_erasing_new_obstacle():
  shapes=[(-4.,0.,0.,'box',.06,3.),(4.,0.,0.,'box',.06,3.),(0.,3.,0.,'box',4.,.06),(0.,-3.,0.,'box',4.,.06)]
@@ -14,3 +14,13 @@ def test_static_matching_handles_pose_error_without_erasing_new_obstacle():
  assert meta['accepted'] and np.percentile(d[:len(walls)],95)<.15
  assert np.min(d[len(walls):])>2.
  assert np.array_equal(points,np.concatenate([walls,actor])@r.T+np.array([.06,-.05]))
+
+
+def test_stale_lidar_echo_on_chair_surface_can_be_retired_without_hiding_foreground():
+    chair=[(2.2,-1.45,0.,'box',.225,.225)]
+    registration={'accepted':True,'rotation':[[1.,0.],[0.,1.]],'translation':[0.,0.]}
+    alignment=(3.2,2.25,0.)
+    assert static_echo((5.175,.8),alignment,registration,chair,.15)
+    assert not static_echo((4.875,.8),alignment,registration,chair,.15)
+    registration['accepted']=False
+    assert not static_echo((5.175,.8),alignment,registration,chair,.15)

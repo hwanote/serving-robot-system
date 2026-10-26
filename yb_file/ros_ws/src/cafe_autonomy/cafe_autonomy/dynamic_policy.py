@@ -36,7 +36,7 @@ def closest_approach(point,velocity,robot,robot_speed,horizon):
     vx=velocity[0]-robot_speed*math.cos(robot[2]);vy=velocity[1]-robot_speed*math.sin(robot[2])
     den=vx*vx+vy*vy
     t=max(0.,min(horizon,-(rx*vx+ry*vy)/den)) if den>1e-8 else 0.
-    return t,math.hypot(rx+t*vx,ry+t*vy)
+    return float(t),float(math.hypot(rx+t*vx,ry+t*vy))
 
 
 @dataclass
@@ -127,20 +127,64 @@ class Tracks:
 
 class DynamicPolicy:
     def __init__(self,cfg):
-        self.cfg=cfg;self.tracks=Tracks(cfg);self.contact_latched=False;self.contact_active=False;self.contact_since=None;self.contact_ids=set();self.contact_check_sent=False;self.attempts={};self.exhausted=set()
-        self.last_risk=-1e9;self.clear_since=None;self.detours={};self.no_path=set();self.last_request={};self.recovery_latched=False
+        self.cfg=cfg;self.tracks=Tracks(cfg);self.contact_latched=False;self.contact_active=False;self.contact_since=None;self.contact_ids=set();self.contact_check_sent=False;self.attempts={};self.exhausted=set();self.episodes={};self.track_episode={};self.episode_serial=0
+        self.last_risk=-1e9;self.clear_since=None;self.route_clear_since=None;self.detours={};self.no_path=set();self.last_request={};self.recovery_latched=False
     def contact(self,active,now,identities=()):
         if active:
             if not self.contact_latched:
                 self.contact_since=now;self.contact_check_sent=False
             self.contact_latched=True;self.contact_ids.update(identities);self.clear_since=None
         self.contact_active=bool(active)
+    def _episode_for(self,tr,robot,path):
+        # A blockage is a place on a route, not a LiDAR track identifier.
+        point=(tr.x,tr.y)
+        if len(path)>=2:
+            def projected(a,b):
+                dx=b[0]-a[0];dy=b[1]-a[1];length=dx*dx+dy*dy
+                fraction=max(0.,min(1.,((point[0]-a[0])*dx+(point[1]-a[1])*dy)/length)) if length>1e-9 else 0.
+                return a[0]+fraction*dx,a[1]+fraction*dy
+            anchor=min((projected(a,b) for a,b in zip(path,path[1:])),key=lambda p:distance(point,p))
+        else:anchor=point
+        previous=self.track_episode.get(tr.id)
+        if previous in self.episodes and self.episodes[previous]['active']:
+            if distance(point,self.episodes[previous]['point'])<=self.cfg['association_m']:
+                return previous
+        for episode_id,episode in self.episodes.items():
+            if (episode['active'] and distance(point,episode['point'])<=self.cfg['association_m']
+                    and distance(anchor,episode['anchor'])<=self.cfg['association_m']
+                    and distance(robot,episode['robot'])<=self.cfg['path_lookahead_m']):
+                self.track_episode[tr.id]=episode_id
+                self.attempts[tr.id]=episode['failures']
+                return episode_id
+        self.episode_serial+=1;episode_id='blockage_'+str(self.episode_serial)
+        self.episodes[episode_id]={'point':point,'anchor':anchor,'robot':robot[:2],
+                                   'failures':0,'pending':False,'executing':False,'active':True,'alerted':False,
+                                   'stationary_since':tr.stopped_since,'blocked_since':tr.blocked_since,'event_times':{}}
+        self.track_episode[tr.id]=episode_id;self.attempts[tr.id]=0
+        return episode_id
+
     def detour_result(self,ids,state,now):
+        episodes={self.track_episode[key] for key in ids if key in self.track_episode}
+        for episode_id in episodes:
+            episode=self.episodes.get(episode_id)
+            if not episode or not episode['active']:continue
+            if state=='EXECUTING':
+                episode['pending']=False;episode['executing']=True
+            elif state=='NO_PATH':
+                # Count a completed failed plan or aborted execution once, not the request.
+                if episode['pending'] or episode['executing']:
+                    episode['failures']+=1
+                episode['pending']=False;episode['executing']=False
+                self.last_request[episode_id]=now
+            elif state in ('FAILED','CANCELED','COMPLETED'):
+                episode['pending']=False;episode['executing']=False
+            for key in ids:
+                if self.track_episode.get(key)==episode_id:self.attempts[key]=episode['failures']
         for key in ids:
             if state=='EXECUTING':self.detours[key]=now;self.no_path.discard(key)
-            elif state=='NO_PATH':self.detours.pop(key,None);self.no_path.add(key);self.last_request[key]=now
+            elif state=='NO_PATH':self.detours.pop(key,None);self.no_path.add(key)
             elif state in ('FAILED','CANCELED','COMPLETED'):self.detours.pop(key,None)
-    def update(self,now,robot,speed,path,front_clear,active=True,angular_speed=0.):
+    def update(self,now,robot,speed,path,front_clear,active=True,angular_speed=0.,planned_path=False):
         cfg=self.cfg;events=[];states=[];snapshots=[];hold=False;risk=False;ratio=1.;blockers=[];nearest=None;front_person=None
         if front_clear>=cfg['front_clear_m']:
             if self.clear_since is None:self.clear_since=now
@@ -148,10 +192,7 @@ class DynamicPolicy:
         clearance_ok=self.clear_since is not None and now-self.clear_since>=cfg['front_clear_hold_s']
         contact_elapsed=max(0.,now-self.contact_since) if self.contact_since is not None else 0.
         if self.contact_latched and contact_elapsed>=cfg['contact_observe_s']:
-            if not self.contact_active and clearance_ok:
-                self.contact_latched=False;self.contact_since=None;self.contact_ids.clear()
-                events.append({'event':'CONTACT_RELEASED','time_s':now})
-            elif self.contact_active and not self.contact_check_sent:
+            if self.contact_active and not self.contact_check_sent:
                 self.contact_check_sent=True
                 events.append({'event':'CONTACT_PATH_CHECK','time_s':now,'track_ids':[],'contact_ids':sorted(self.contact_ids)})
         for key,tr in self.tracks.items.items():
@@ -167,20 +208,29 @@ class DynamicPolicy:
             ttc,cpa=closest_approach((tr.x,tr.y),(tr.vx,tr.vy),robot,speed,cfg['prediction_horizon_s'])
             collision=(cpa<cfg['robot_radius_m']+tr.radius+cfg['prediction_margin_m'] and ttc<=cfg['ttc_stop_s'] and (ttc>0. or centre<cfg['robot_radius_m']+tr.radius+cfg['hard_stop_clearance_m']))
             # Existing person STOP is kept separate from the 3m response range.
-            stop_distance=cfg['person_stop_m'] if tr.label=='person' else cfg['object_stop_m']
+            stop_distance=cfg['person_stop_m']
             rotation_risk=abs(angular_speed)>.02 and (centre<cfg['robot_radius_m']+tr.radius+cfg['prediction_margin_m'] or cpa<cfg['robot_radius_m']+tr.radius+cfg['prediction_margin_m'] and ttc<=cfg['rotation_prediction_s'])
             collision=collision or rotation_risk or (in_front and blocked and d<=stop_distance)
             risk=risk or collision
             state='TRACKING_5M'
             if in_front and d<=cfg['response_m']:
                 state='RESPONSE_3M';ratio=min(ratio,cfg['response_speed_ratio'])
+            episode_id=self._episode_for(tr,robot,corridor) if blocked and tr.stopped_since is not None else self.track_episode.get(key)
+            episode=self.episodes.get(episode_id)
             if tr.moving:
-                tr.blocked_since=None;tr.emitted.clear();self.detours.pop(key,None);self.no_path.discard(key);self.attempts.pop(key,None);self.exhausted.discard(key)
+                tr.blocked_since=None;tr.emitted.clear();self.detours.pop(key,None);self.no_path.discard(key)
                 if collision:state='YIELD_MOVING';hold=True
+                if blocked and episode and episode['failures']>=cfg['max_detour_attempts']:
+                    state='DETOUR_EXHAUSTED';hold=True
             elif tr.stopped_since is not None and blocked:
                 if tr.blocked_since is None:
-                    tr.blocked_since=max(tr.stopped_since,now);tr.blocked_path=list(path)
-                elapsed=now-tr.stopped_since;blocked_for=now-tr.blocked_since
+                    tr.blocked_since=episode['blocked_since'] if episode and episode['blocked_since'] is not None else max(tr.stopped_since,now)
+                    if not tr.blocked_path:tr.blocked_path=list(path)
+                if episode:
+                    episode['blocked_since']=tr.blocked_since
+                    episode['stationary_since']=min(episode['stationary_since'],tr.stopped_since)
+                elapsed=now-(episode['stationary_since'] if episode else tr.stopped_since)
+                blocked_for=now-tr.blocked_since
                 blockers.append(key)
                 if elapsed<cfg['observe_stopped_s']:state='OBSERVE_3S';hold=True
                 elif key in self.detours:state='DETOUR_EXECUTING'
@@ -188,28 +238,64 @@ class DynamicPolicy:
                     state='NO_PATH_SAFE_WAIT' if key in self.no_path else 'WAIT_BLOCKED';hold=True
                     for name,threshold in [('BLOCKED_ALERT',cfg['blocked_alert_s']),('REPLAN_CHECK',cfg['replan_check_s'])]:
                         if elapsed>=threshold and name not in tr.emitted:
-                            tr.emitted.add(name);events.append({'event':name,'track_ids':[key],'time_s':now,'stationary_s':elapsed,'blocked_s':blocked_for})
-                    if not tr.uncertain and elapsed>=cfg['detour_after_s'] and blocked_for>=cfg['detour_after_s']:
-                        if self.attempts.get(key,0)>=cfg['max_detour_attempts']:
-                            state='DETOUR_EXHAUSTED'
-                            if key not in self.exhausted:
-                                self.exhausted.add(key);events.append({'event':'DETOUR_EXHAUSTED','track_ids':[key],'time_s':now,'attempts':self.attempts[key]})
-                        elif key not in tr.emitted or now-self.last_request.get(key,-1e9)>=cfg['detour_retry_s']:
-                            self.attempts[key]=self.attempts.get(key,0)+1
-                            self.last_request[key]=now;tr.emitted.add(key)
+                            tr.emitted.add(name)
+                            event_times=episode['event_times'] if episode else {}
+                            if now-event_times.get(name,-1e9)>=cfg['detour_after_s']:
+                                event_times[name]=now
+                                events.append({'event':name,'track_ids':[key],'time_s':now,'stationary_s':elapsed,'blocked_s':blocked_for})
+                    if episode and episode['failures']>=cfg['max_detour_attempts']:
+                        state='DETOUR_EXHAUSTED';hold=True
+                        if not episode['alerted']:
+                            episode['alerted']=True;self.exhausted.add(episode_id)
+                            events.append({'event':'DETOUR_EXHAUSTED','track_ids':[key],'episode_id':episode_id,'time_s':now,'attempts':episode['failures']})
+                    elif not tr.uncertain and elapsed>=cfg['detour_after_s'] and blocked_for>=cfg['detour_after_s']:
+                        if episode and not episode['pending'] and now-self.last_request.get(episode_id,-1e9)>=cfg['detour_retry_s']:
+                            episode['pending']=True;self.last_request[episode_id]=now;tr.emitted.add(key)
                             state='DETOUR_REQUESTED'
-                            events.append({'event':'DYNAMIC_DETOUR_REQUEST','track_ids':[key],'time_s':now,'stationary_s':elapsed,'blocked_s':blocked_for,
-                                           'attempt':self.attempts[key],'obstacles':[{'x':tr.x,'y':tr.y,'radius':tr.radius}]})
-            elif not blocked:
+                            events.append({'event':'DYNAMIC_DETOUR_REQUEST','track_ids':[key],'episode_id':episode_id,'time_s':now,'stationary_s':elapsed,'blocked_s':blocked_for,
+                                           'attempt':episode['failures']+1,'obstacles':[{'x':tr.x,'y':tr.y,'radius':tr.radius}]})
+            if not blocked:
                 tr.blocked_since=None
                 for flag in ('BLOCKED_ALERT','REPLAN_CHECK',key):tr.emitted.discard(flag)
+                # Clear failure history only after the observed route is open and
+                # the object moved aside or the robot actually passed its segment.
+                if episode and not tr.uncertain and clearance_ok and (tr.moving or
+                        distance(robot,episode['robot'])>cfg['association_m']) and key not in self.detours and not any(
+                        other.id!=key and distance((other.x,other.y),episode['point'])<=cfg['association_m']
+                        for other in self.tracks.items.values()):
+                    episode['active']=False;self.exhausted.discard(episode_id);self.last_request.pop(episode_id,None)
+                    self.track_episode.pop(key,None);self.attempts.pop(key,None);self.no_path.discard(key)
             if tr.uncertain and blocked:state='TRACK_UNCERTAIN';hold=True
             item=tr.snapshot(now);item.update({'distance_m':d,'blocks_path':blocked,'in_front':in_front,'rotation_risk':rotation_risk,'ttc_s':ttc,'closest_approach_m':cpa,'stage':state});snapshots.append(item);states.append(state)
+        # A plan for this mission leg and current risk/track checks can establish
+        # safe clearance even when a fixed static structure remains within 1 m.
+        # Nav2 and Collision Monitor still own the final path and collision checks.
+        route_safe=bool(active and planned_path and not risk and not blockers and
+                        'TRACK_UNCERTAIN' not in states)
+        if route_safe:
+            if self.route_clear_since is None:self.route_clear_since=now
+        else:self.route_clear_since=None
+        route_clearance_ok=(self.route_clear_since is not None and
+                            now-self.route_clear_since>=cfg['front_clear_hold_s'])
+        release_ok=clearance_ok or route_clearance_ok
+        if self.contact_latched and contact_elapsed>=cfg['contact_observe_s'] and not self.contact_active and release_ok:
+            self.contact_latched=False;self.contact_since=None;self.contact_ids.clear()
+            events.append({'event':'CONTACT_RELEASED','time_s':now})
+        # Tracks disappear only after the adapter verifies the old LiDAR ray is
+        # clear. Retire their episode once the normal clearance hold also passes.
+        for episode_id,episode in self.episodes.items():
+            if not episode['active'] or not clearance_ok:continue
+            if any(distance((tr.x,tr.y),episode['point'])<=cfg['association_m'] for tr in self.tracks.items.values()):continue
+            episode['active']=False;self.exhausted.discard(episode_id);self.last_request.pop(episode_id,None)
+            for key,mapped in list(self.track_episode.items()):
+                if mapped==episode_id:
+                    self.track_episode.pop(key,None);self.attempts.pop(key,None)
+                    self.no_path.discard(key);self.detours.pop(key,None)
         if risk:self.last_risk=now;self.recovery_latched=True
         risk_lock=(now-self.last_risk<cfg['noncontact_pause_s'])
-        if not risk and not risk_lock and clearance_ok:self.recovery_latched=False
+        if not risk and not risk_lock and release_ok:self.recovery_latched=False
         # A stopped blocking episode cannot resume just because its 3s timer expired.
-        clear_hold=self.recovery_latched and not clearance_ok
+        clear_hold=self.recovery_latched and not release_ok
         turn_only=bool(self.detours) and clear_hold and not (risk or risk_lock or self.contact_latched)
         stop=risk or risk_lock or self.contact_latched or (clear_hold and not turn_only)
         hold=hold or stop
@@ -222,4 +308,4 @@ class DynamicPolicy:
         else:stage='CLEAR'
         return {'time_s':now,'stage':stage,'stop':stop,'linear_stop':bool(turn_only),'hold_navigation':bool(hold and active),'speed_ratio':ratio,
                 'nearest_object_m':nearest,'front_person_m':front_person,'contact_latched':self.contact_latched,'contact_active':self.contact_active,'contact_since_s':self.contact_since,'contact_observed_s':contact_elapsed,'detour_attempts':dict(self.attempts),'front_clear_m':front_clear,
-                'clearance_confirmed':clearance_ok,'blocker_ids':blockers,'tracks':snapshots,'events':events}
+                'clearance_confirmed':release_ok,'blocker_ids':blockers,'tracks':snapshots,'events':events}

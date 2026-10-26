@@ -22,7 +22,7 @@ from ros_gz_interfaces.msg import Contacts
 from tf2_ros import Buffer,TransformListener
 from .dynamic_policy import DynamicPolicy,distance,path_blocks
 from .runtime_config import load_limits
-from .static_reference import register_static,closest
+from .static_reference import register_static,closest,static_echo
 
 
 def yaw(q):return math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))
@@ -238,7 +238,21 @@ class DynamicObstacles(Node):
         index=int(round((angle-self.scan.angle_min)/self.scan.angle_increment))
         if not 0<=index<len(self.scan.ranges):return False
         observed=self.scan.ranges[index]
-        return (math.isfinite(observed) or math.isinf(observed)) and observed>distance((x,y),(tr.x,tr.y))+tr.radius+self.cfg['clear_ray_margin_m']
+        center_distance=distance((x,y),(tr.x,tr.y))
+        if (math.isfinite(observed) or math.isinf(observed)) and observed>center_distance+tr.radius+self.cfg['clear_ray_margin_m']:
+            return True
+        # An authored chair or wall can keep the ray occupied after an erroneous
+        # foreground track has gone stale. Remove only LiDAR-only tracks when the
+        # current echo intersects that track and matches an aligned static surface.
+        if (tr.label=='person' or 'LiDAR_FOREGROUND' not in tr.sources or
+                len(tr.sources)!=1 or not math.isfinite(observed) or
+                observed<self.scan.range_min or
+                abs(observed-center_distance)>tr.radius+self.cfg['clear_ray_margin_m']):
+            return False
+        ray_angle=a+self.scan.angle_min+index*self.scan.angle_increment
+        point=(x+observed*math.cos(ray_angle),y+observed*math.sin(ray_angle))
+        return static_echo(point,self.alignment,self.static_alignment,self.static_shapes,
+                           self.cfg['static_match_margin_m'])
 
     def tick(self):
         now=self.get_clock().now().nanoseconds*1e-9;wall=time.monotonic()
@@ -251,7 +265,7 @@ class DynamicObstacles(Node):
             self.engine.tracks.age(now,self.verified_clear)
             path=self.path
             if not path and self.target:path=[self.last_pose[:2],self.target[:2]]
-            report=self.engine.update(now,self.last_pose,max(self.cmd,self.odom_speed),path,self.front_clear,self.active,self.angular_cmd)
+            report=self.engine.update(now,self.last_pose,max(self.cmd,self.odom_speed),path,self.front_clear,self.active,self.angular_cmd,planned_path=bool(self.path_history))
         else:report={'stage':'SENSOR_STALE','stop':True,'linear_stop':True,'hold_navigation':True,'speed_ratio':0.,'tracks':[],'events':[],'time_s':now}
         if not fresh:report.update({'stage':'SENSOR_STALE','stop':True,'hold_navigation':True,'speed_ratio':0.})
         report.update({'robot_id':self.robot,'sensor_fresh':bool(fresh),'camera_fresh':bool(camera),'lidar_fresh':bool(lidar),

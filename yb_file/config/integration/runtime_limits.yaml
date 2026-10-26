@@ -2,6 +2,7 @@ arrival:
   fine_engage_max_m: 0.2
   fine_timeout_s: 120.0
   xy_tolerance_m: 0.1
+  control_xy_target_m: 0.04
   yaw_tolerance_rad: 0.25
   settle_s: 0.5
   settle_linear_mps: 0.015
@@ -20,8 +21,8 @@ navigation:
   stuck_distance_m: 0.08
   stuck_window_s: 20.0
   progress_allowance_s: 40.0
-  cumulative_rotation_rad: 2.9670597283903604
-  continuous_rotation_rad: 3.0543261909900767
+  cumulative_rotation_rad: 4.71238898038469
+  continuous_rotation_rad: 3.141592653589793
   rotation_stop_rps: 0.02
   rotation_end_hold_s: 0.3
   goal_retry_max: 3
@@ -50,7 +51,7 @@ dynamic_obstacles:
   replan_check_s: 20.0
   detour_after_s: 30.0
   person_stop_m: 0.8
-  object_stop_m: 1.0
+  object_stop_m: 0.8
   noncontact_pause_s: 1.5
   front_clear_m: 1.0
   front_clear_hold_s: 2.0

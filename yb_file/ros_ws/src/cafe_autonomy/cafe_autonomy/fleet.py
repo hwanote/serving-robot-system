@@ -6,19 +6,25 @@ import math
 import sqlite3
 import threading
 import queue
+import hashlib
+from collections import deque
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 import rclpy
+from rclpy.action import ActionClient
 from rclpy.node import Node
 from std_msgs.msg import String, Bool
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from nav2_msgs.action import ComputePathToPose
+from action_msgs.msg import GoalStatus
 from .runtime_config import load_limits
 from tf2_ros import Buffer,TransformListener
 from rclpy.time import Time
 import yaml
 from .policy import Task, FleetCore, ROBOT_IDS, ACTIVE, distance, may_confirm, ZoneArbiter, in_bounds
+from .yield_policy import candidate_poses, assess_path, choose_yield
 
 
 def jparse(text):
@@ -32,6 +38,7 @@ class Fleet(Node):
         self.declare_parameter('http_port',8765)
         self.declare_parameter('runtime_limits_file','')
         self.declare_parameter('zones_file','')
+        self.declare_parameter('waypoints_file','')
         self.limits=load_limits(self.get_parameter('runtime_limits_file').value)
         zone_file=self.get_parameter('zones_file').value
         zone_map=yaml.safe_load(Path(zone_file).read_text(encoding='utf8'))['zones'] if zone_file else {}
@@ -46,7 +53,13 @@ class Fleet(Node):
         self.safety={};self.last_error=None;self.dispatch_started={};self.replies={};self.terminal_seen=set()
         self.traffic={r:True for r in ROBOT_IDS}; self.person_zones={}
         self.recovery=None;self.zone_config=yaml.safe_load(Path(zone_file).read_text())
-        self.blocked_since={};self.block_alerted=set()
+        self.blocked_since={};self.block_alerted=set();self.yield_attempted=set()
+        waypoint_file=self.get_parameter('waypoints_file').value
+        destinations=yaml.safe_load(Path(waypoint_file).read_text(encoding='utf8'))['destinations']
+        self.home_poses=[(destinations[r+'_HOME']['x'],destinations[r+'_HOME']['y']) for r in ROBOT_IDS]
+        self.pose_yaw={};self.pose_history={r:deque(maxlen=120) for r in ROBOT_IDS}
+        self.yield_probe=None;self.yield_generation=0;self.last_yielder=None
+        self.yield_planners={r:ActionClient(self,ComputePathToPose,f'/{r}/compute_path_to_pose') for r in ROBOT_IDS}
         self.commands={r:self.create_publisher(String,f'/{r}/serving/request',10) for r in ROBOT_IDS}
         self.complete={r:self.create_publisher(String,f'/{r}/serving/complete',10) for r in ROBOT_IDS}
         self.holds={r:self.create_publisher(Bool,f'/{r}/traffic_hold',10) for r in ROBOT_IDS}
@@ -236,6 +249,104 @@ class Fleet(Node):
                 return True
         return False
 
+    def _finish_yield_probe(self):
+        probe=self.yield_probe
+        if not probe:return
+        self.yield_probe=None
+        if (any(r not in self.blocked_since or not self.traffic.get(r) or
+                distance(self.poses.get(r,probe['robot_poses'][r]),probe['robot_poses'][r])
+                    >self.limits['fleet']['robot_separation_m']/2 for r in ROBOT_IDS)):
+            self.record('YIELD_PROBE_STALE',{'robot_poses':self.poses})
+            self.yield_attempted.clear()
+            return
+        choice=choose_yield(probe['results'],self.last_yielder)
+        if not choice:
+            self.last_error='No Nav2-verified traffic yield route; both robots remain safely held'
+            self.record('YIELD_NO_SAFE_ROUTE',{'rejected':probe['rejected']})
+            return
+        loser=choice['robot'];winner=next(r for r in ROBOT_IDS if r!=loser)
+        self.last_yielder=loser
+        self.recovery={'loser':loser,'winner':winner,'started':time.monotonic(),
+                       'blocked_goal':self.status[loser].get('target_pose'),
+                       'yield_pose':choice['pose'],'route_length_m':choice['length_m'],
+                       'peer_clearance_m':choice['peer_clearance_m'],
+                       'route_sha256':choice['route_sha256']}
+        self.publish_msg(self.commands[loser],{'command':'YIELD','robot_id':loser,
+                         'request_id':self.status[loser].get('request_id'),
+                         'pose':choice['pose']})
+        self.record('YIELD_RETREAT_REQUEST',self.recovery)
+
+    def _yield_plan_done(self,generation,robot,candidate,here,peer,reply=None,reason=None):
+        probe=self.yield_probe
+        if not probe or probe['generation']!=generation:return
+        if reply is not None:
+            try:
+                result=reply.result()
+                path=result.result.path
+                if result.status==GoalStatus.STATUS_SUCCEEDED and result.result.error_code==0:
+                    points=[(p.pose.position.x,p.pose.position.y) for p in path.poses]
+                    proof=assess_path(points,here,candidate,peer,
+                        self.limits['fleet']['robot_separation_m'],
+                        self.limits['fleet']['robot_separation_m']/2,
+                        self.limits['arrival']['xy_tolerance_m'])
+                    if proof:
+                        route_hash=hashlib.sha256(json.dumps(points).encode()).hexdigest()
+                        probe['results'].append({'robot':robot,'pose':candidate[:3],
+                            'rear_turn':candidate[3],
+                            'turn_rad':abs(math.atan2(math.sin(candidate[2]-here[2]),
+                                                      math.cos(candidate[2]-here[2]))),
+                            'route_sha256':route_hash,**proof})
+                    else:reason='PATH_TOO_CLOSE_TO_PEER_OR_STALE'
+                else:reason='NAV2_NO_VALID_PATH'
+            except Exception as exc:reason='NAV2_PATH_ERROR: '+str(exc)
+        if reason:probe['rejected'].append({'robot':robot,'pose':candidate[:3],'reason':reason})
+        probe['pending']-=1
+        if probe['pending']==0:self._finish_yield_probe()
+
+    def _yield_plan_response(self,f,generation,robot,candidate,here,peer):
+        probe=self.yield_probe
+        if not probe or probe['generation']!=generation:return
+        try:handle=f.result()
+        except Exception as exc:
+            self._yield_plan_done(generation,robot,candidate,here,peer,reason=str(exc));return
+        if not handle or not handle.accepted:
+            self._yield_plan_done(generation,robot,candidate,here,peer,reason='NAV2_PLAN_REJECTED');return
+        probe['handles'].append(handle)
+        handle.get_result_async().add_done_callback(
+            lambda result:self._yield_plan_done(generation,robot,candidate,here,peer,reply=result))
+
+    def _start_yield_probe(self,now,poses,goals):
+        self.yield_generation+=1;generation=self.yield_generation
+        probe={'generation':generation,'started':now,'pending':0,'results':[],
+               'rejected':[],'handles':[],'robot_poses':dict(poses)}
+        self.yield_probe=probe
+        separation=self.limits['fleet']['robot_separation_m']
+        margin=self.limits['fleet']['zone_approach_margin_m']
+        for robot in ROBOT_IDS:
+            peer=next(r for r in ROBOT_IDS if r!=robot)
+            here=(*poses[robot],self.pose_yaw.get(robot,0.))
+            candidates=candidate_poses(here,poses[peer],self.pose_history[robot],
+                self.zones.zones,self.zone_config.get('no_go',{}),self.home_poses,
+                goals.get(peer),separation,margin)
+            candidates=sorted(candidates,key=lambda c:c[3])[:8]
+            client=self.yield_planners[robot]
+            if not client.server_is_ready():
+                probe['rejected'].append({'robot':robot,'reason':'NAV2_PLANNER_UNAVAILABLE'})
+                continue
+            for candidate in candidates:
+                goal=ComputePathToPose.Goal();goal.planner_id='ForwardPath';goal.use_start=False
+                goal.goal.header.frame_id='map';goal.goal.header.stamp=self.get_clock().now().to_msg()
+                goal.goal.pose.position.x=candidate[0];goal.goal.pose.position.y=candidate[1]
+                goal.goal.pose.orientation.z=math.sin(candidate[2]/2)
+                goal.goal.pose.orientation.w=math.cos(candidate[2]/2)
+                probe['pending']+=1
+                client.send_goal_async(goal).add_done_callback(
+                    lambda f,g=generation,r=robot,c=candidate,h=here,p=poses[peer]:
+                    self._yield_plan_response(f,g,r,c,h,p))
+        self.record('YIELD_ROUTE_PROBE',{'candidates':probe['pending'],
+                    'robot_poses':poses,'goals':goals})
+        if probe['pending']==0:self._finish_yield_probe()
+
     def tick(self):
         while True:
             try:body,resq=self.http_queue.get_nowait()
@@ -260,7 +371,16 @@ class Fleet(Node):
                 age=(self.get_clock().now().nanoseconds-(t.header.stamp.sec*10**9+t.header.stamp.nanosec))/1e9
                 if age<1.:
                     self.poses[r]=(t.transform.translation.x,t.transform.translation.y);self.pose_wall[r]=now
+                    q=t.transform.rotation
+                    self.pose_yaw[r]=math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))
+                    history=self.pose_history[r]
+                    if not history or distance(history[-1],self.poses[r])>=self.limits['navigation']['stuck_distance_m']:
+                        history.append(self.poses[r])
             except Exception:pass
+        if self.yield_probe and now-self.yield_probe['started']>self.limits['dynamic_obstacles']['detour_plan_timeout_s']:
+            for handle in self.yield_probe['handles']:handle.cancel_goal_async()
+            self.yield_probe['rejected'].append({'reason':'NAV2_PLAN_TIMEOUT'})
+            self._finish_yield_probe()
         for r in ROBOT_IDS:
             supervisor_fresh=now-self.status_wall.get(r,-1e9)<2.
             pose_valid=supervisor_fresh and (now-self.pose_wall.get(r,-1e9) < 2.0 and now-self.odom_wall.get(r,-1e9)<1.0)
@@ -269,6 +389,16 @@ class Fleet(Node):
         # Fleet-owned zone arbitration and collision separation.
         current_map_poses={r:p for r,p in self.poses.items() if now-self.pose_wall.get(r,-1e9)<2.0}
         traffic_conflict=set(self.zones.update(self.poses,self.limits['fleet']['zone_approach_margin_m']))
+        # Reciprocal destination occupancy can stop both planners before they move.
+        # Treat it as a mutual traffic block only while both missions and poses are fresh.
+        goals={r:self.status[r].get('target_pose') for r in ROBOT_IDS}
+        active=all(self.status[r].get('state') in ('GOING_PICKUP','GOING_TABLE','GOING_DIRECT','GOING_KITCHEN','RETURNING_HOME')
+                   and now-self.status_wall.get(r,-1e9)<2. and r in current_map_poses
+                   and isinstance(goals[r],(list,tuple)) and len(goals[r])>=2 for r in ROBOT_IDS)
+        mutual_goal_occupancy=(active and distance(goals['robot_01'],goals['robot_02'])>self.limits['fleet']['robot_separation_m']
+            and distance(current_map_poses['robot_01'],goals['robot_02'])<self.limits['fleet']['robot_separation_m']
+            and distance(current_map_poses['robot_02'],goals['robot_01'])<self.limits['fleet']['robot_separation_m'])
+        if mutual_goal_occupancy:traffic_conflict.update(ROBOT_IDS)
         for r in traffic_conflict:self.traffic[r]=True
         # One robot yields when close. Do not use last scan range as a person proxy.
         if all(r in current_map_poses for r in ROBOT_IDS):
@@ -283,7 +413,11 @@ class Fleet(Node):
             elif st=='YIELD_WAIT':
                 self.traffic[loser]=True
                 occupied=any(in_bounds(current_map_poses.get(winner),b,.45) for b in self.zones.zones.values())
-                if not occupied and safe:
+                blocked_goal=self.recovery.get('blocked_goal')
+                goal_clear=(not blocked_goal or
+                            (winner in current_map_poses and
+                             distance(current_map_poses[winner],blocked_goal[:2])>=self.limits['fleet']['robot_separation_m']))
+                if not occupied and goal_clear and safe:
                     self.publish_msg(self.commands[loser],{'command':'RESUME','robot_id':loser})
                     self.record('YIELD_RECOVERY_COMPLETE',self.recovery);self.recovery=None;self.last_error=None
             elif st in ('ERROR','CANCELED','COMPLETED') or now-self.recovery['started']>self.limits['navigation']['goal_timeout_s']:
@@ -291,19 +425,26 @@ class Fleet(Node):
         for r in ROBOT_IDS:
             if r in traffic_conflict and self.traffic[r] and self.status[r].get('state') in ('GOING_PICKUP','GOING_TABLE','GOING_DIRECT','GOING_KITCHEN','RETURNING_HOME'):
                 self.blocked_since.setdefault(r,now)
-                if (r not in self.block_alerted and now-self.blocked_since[r] >= self.limits['fleet']['blocked_alert_s']):
+                blocked_for=now-self.blocked_since[r]
+                if r not in self.block_alerted and blocked_for>=self.limits['fleet']['blocked_alert_s']:
                     self.block_alerted.add(r)
-                    detail={'robot':r,'seconds':round(now-self.blocked_since[r],2),
-                            'reason':'YIELD_RECOVERY_REQUESTED'}
+                    detail={'robot':r,'seconds':round(blocked_for,2),
+                            'reason':'FLEET_TRAFFIC_HOLD'}
                     self.record('FLEET_TRAFFIC_BLOCKED',detail)
-                    if self.recovery is None and all(bot in current_map_poses for bot in ROBOT_IDS):
-                        loser=r;winner=next(bot for bot in ROBOT_IDS if bot!=loser)
-                        self.recovery={'loser':loser,'winner':winner,'started':now}
-                        self.publish_msg(self.commands[loser],{'command':'YIELD','robot_id':loser})
-                        self.record('YIELD_RETREAT_REQUEST',self.recovery)
                     self.last_error='Fleet traffic hold exceeded configured limit: '+r
+                peer=next(bot for bot in ROBOT_IDS if bot!=r)
+                peer_blocked=self.blocked_since.get(peer)
+                mutual_hold=(self.traffic.get(peer,False) and peer_blocked is not None
+                             and now-peer_blocked>=self.limits['fleet']['blocked_alert_s'])
+                if (blocked_for>=self.limits['fleet']['blocked_alert_s'] and mutual_hold
+                        and self.recovery is None and self.yield_probe is None
+                        and not self.yield_attempted
+                        and all(bot in current_map_poses for bot in ROBOT_IDS)):
+                    self.yield_attempted.update(ROBOT_IDS)
+                    self._start_yield_probe(now,current_map_poses,goals)
             else:
                 self.blocked_since.pop(r,None);self.block_alerted.discard(r)
+                self.yield_attempted.discard(r)
             self.holds[r].publish(Bool(data=bool(self.traffic[r])))
         ready={r for r in ROBOT_IDS if self.status[r].get('state') in ('IDLE','COMPLETED','CANCELED') and not self.traffic[r] and self.status[r].get('map_valid') is True and self.status[r].get('nav_ready') is True and self.commands[r].get_subscription_count()>0}
         task=self.core.dispatch_next(ready,kitchen_free=not self.kitchen_busy())

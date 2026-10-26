@@ -4,7 +4,7 @@ from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]
 local=root/'_local_only';local.mkdir(exist_ok=True)
-ap=argparse.ArgumentParser();ap.add_argument('action',choices=['start','stop']);ap.add_argument('--mode',choices=['operation','mapping'],default='operation');ap.add_argument('--headless',action='store_true');args=ap.parse_args()
+ap=argparse.ArgumentParser();ap.add_argument('action',choices=['start','stop']);ap.add_argument('--mode',choices=['operation','mapping'],default='operation');ap.add_argument('--headless',action='store_true');ap.add_argument('--robot',choices=['robot_01','robot_02']);args=ap.parse_args()
 pidfile=local/'runtime.json'
 if args.action=='stop':
     if not pidfile.exists():print('No managed session');sys.exit(0)
@@ -39,7 +39,7 @@ if args.mode=='operation':
     c=yaml.safe_load(config.read_text())
     for path in (c['map_yaml'],c['perception']['weights']):
         if not Path(path).is_file() or Path(path).stat().st_size==0:raise SystemExit('Missing runtime asset: '+path)
-command='source /opt/ros/jazzy/setup.bash && source '+str(root/'ros_ws/install/setup.bash')+' && exec ros2 launch cafe_autonomy team.launch.py config:='+str(config)+' mode:='+args.mode+' gui:='+('false' if args.headless else 'true')
+command='source /opt/ros/jazzy/setup.bash && source '+str(root/'ros_ws/install/setup.bash')+' && exec ros2 launch cafe_autonomy team.launch.py config:='+str(config)+' mode:='+args.mode+' gui:='+('false' if args.headless else 'true')+(' robot:='+args.robot if args.robot else '')
 stamp=time.strftime('%Y%m%d_%H%M%S');logpath=local/(args.mode+'_'+stamp+'.log')
 with open(logpath,'wb') as log:
     child=subprocess.Popen(['bash','-c',command],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)

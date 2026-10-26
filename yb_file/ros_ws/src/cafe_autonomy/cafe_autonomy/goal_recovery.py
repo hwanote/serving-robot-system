@@ -131,6 +131,6 @@ class GoalRecoveryMixin:
                 self.fail('GOAL_RETRY_EXHAUSTED',self.recovery_reason or 'Goal recovery limit');return
             self.goal_retry_count+=1;phase=self.recovery_phase;self.emit('GOAL_RECOVERY_RETRY',reason=self.recovery_reason)
             error=self.pose_error()
-            if error and error[0]<=self.fine_engage_max and self.recovery_reason!='ROTATION_LIMIT_FORWARD_PATH' and abs(error[1])+.08<self.limits['navigation']['cumulative_rotation_rad']-self.rotation_status.get('cumulative_rad',0.):
+            if error and error[0]<=self.fine_engage_max and self.recovery_reason!='ROTATION_LIMIT_FORWARD_PATH' and abs(error[1])+.08<self.limits['navigation']['continuous_rotation_rad']-self.rotation_status.get('continuous_rad',0.):
                 self.state=phase;self.fine=True;self.fine_since=time.monotonic();self.nav_started=time.monotonic();self.emit('RECOVERY_FINE_ALIGNMENT')
             else:self.start_goal(self.target_name,phase,self.target)

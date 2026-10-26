@@ -7,7 +7,8 @@ from rclpy.qos import qos_profile_sensor_data
 from nav_msgs.msg import Path as NavPath
 from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
-p=argparse.ArgumentParser();p.add_argument('--request-id');p.add_argument('--robot',default='robot_01');p.add_argument('--table',default='table_01');p.add_argument('--side',default='auto');p.add_argument('--insert-displacement',type=float,default=.25);p.add_argument('--timeout',type=float,default=420.);a=p.parse_args();root=Path(__file__).resolve().parents[1]
+p=argparse.ArgumentParser();p.add_argument('--request-id');p.add_argument('--robot',default='robot_01');p.add_argument('--table',default='table_01');p.add_argument('--side',default='auto');p.add_argument('--insert-displacement',type=float,default=.25);p.add_argument('--timeout',type=float,default=420.);p.add_argument('--fixture-world-x',type=float);p.add_argument('--fixture-world-y',type=float);a=p.parse_args();root=Path(__file__).resolve().parents[1]
+if (a.fixture_world_x is None)!=(a.fixture_world_y is None):p.error('fixture-world-x and fixture-world-y must be given together')
 def post(d):
  q=urllib.request.Request('http://localhost:8765/api/request',json.dumps(d).encode(),{'Content-Type':'application/json'});return json.load(urllib.request.urlopen(q,timeout=5))
 def status():
@@ -36,7 +37,9 @@ try:
     length+=math.dist(u,v)
     if length>=1.1:point=v;break
    if point:
-    fixture={'world_x':point[0]-3.2,'world_y':point[1]-2.25,'map_point':point,'robot_pose':xy,'time':time.time(),'original_path':list(path)}
+    wx=a.fixture_world_x if a.fixture_world_x is not None else point[0]-3.2
+    wy=a.fixture_world_y if a.fixture_world_y is not None else point[1]-2.25
+    fixture={'world_x':wx,'world_y':wy,'map_point':[wx+3.2,wy+2.25],'robot_pose':xy,'time':time.time(),'original_path':list(path)}
     subprocess.run(['python3',str(root/'scripts/object_scenario.py'),'spawn','--name','moving_obstacle_trial','--x',str(fixture['world_x']),'--y',str(fixture['world_y'])],check=True)
     print('fixture',fixture,flush=True)
   if detour_origin is None and any(e.get('state')=='EXECUTING' for e in detours) and truth:detour_origin=dict(truth);previous=dict(truth)
