@@ -31,10 +31,31 @@ Task 필드: `task_id type destination_id status robot_id created_at updated_at`
 `controls` (카드 버튼 규칙, 화면은 이 값만 따라요): `reset` 연결돼 있으면 true · `reset_nodes` 리셋 때 고를 수 있는 위치(대기 위치, 주방) ·
 `home` 위 규칙을 만족할 때 · `reload_map` 쉬고 있고 `map_current` 가 true 가 아닐 때.
 `map_current`: 로봇이 쓰는 지도가 지금 `config/common` 과 같은지 (`true`/`false`, 로봇 노드가 옛 버전이라 알려 주지 않으면 `null`).
+`map_image_current`: 로봇이 **시작할 때 읽은 지도 그림**(`maps/stores/<store>/map.yaml`+`map.pgm`)이 지금 매장 지도와 같은지 (`true`/`false`/`null`). 로봇은 `mission_status.map_image`(12자리 해시)로 알린다. `false` 면 지도 그림이 바뀐 뒤 로봇이 재시작되지 않은 것이므로 **"지도 다시 읽기"로는 안 되고 재시작이 필요**하며, 그 로봇은 배차에서 제외된다(`null` 이면 제외하지 않음). 새 지도를 채택(`POST /api/mapping/save`)하면 모든 로봇이 `false` 가 된다.
 로봇이 보고하는 값은 `mission_status.config_revision` (= 세 yaml 파일의 짧은 해시)이에요.
 
 ## 지도 / 매핑 / WebSocket
-`/api/stores/{id}/map|map.png`, `/api/mapping/*`(아직 501), `WS /ws/state` — 임시 브리지와 동일.
+`/api/stores/{id}/map|map.png`, `WS /ws/state` — 임시 브리지와 동일.
+
+### 자동 매핑 (`/api/mapping/*`, `/api/stores/{id}/map-review*`)
+로봇/매핑 스택(Gazebo·SLAM·Nav2)은 사람이 터미널에서 미리 켠다. 백엔드는 매핑 **세션 스크립트**만 시작/중지한다.
+기본은 꺼짐(`mapping_enabled: false` → `503 MAPPING_DISABLED`). 오류 본문은 `{code, message}`.
+
+| 메서드 경로 | 설명 |
+|---|---|
+| `GET /api/mapping/status` | `{store_id, phase(idle\|mapping\|stopped), started_at, last_saved_revision, draft_ready, completion_reason, message, error, stop_requested, navigation_authorized, enabled, stage, progress, saved}`. `stage`: starting·exploring·finishing·converting·ready·failed. `progress`: `{percent(추정·줄지 않음·초안 전 99% 상한), estimated, elapsed_s, goals_sent, goals_arrived, goals_failed}` |
+| `POST /api/mapping/start` | 거절: `503 MAPPING_DISABLED / STACK_NOT_READY / RUNNER_NOT_FOUND`, `409 ALREADY_MAPPING / DRAFT_PENDING / ORDERS_ACTIVE` |
+| `POST /api/mapping/stop` | 중간에 끊기. 탐색이 스스로 끝나면 Stop 없이도 초안이 만들어진다. `409 NOT_MAPPING` |
+| `POST /api/mapping/discard` | 반영하지 않은 초안을 버림(삭제 안 함, `drafts/archive`로 보관) |
+| `GET /api/stores/{id}/map-review`, `.../map-review.png` | 보정 화면용 정보·미리보기. 초안이 없으면 `409 NO_DRAFT` |
+| `POST /api/mapping/save` (= `POST /api/stores/{id}/map-review/finalize`) | 본문 `{source_hash, confirmed:true, strokes}`. 보정 저장 후 바로 `maps/stores/<store>/`에 채택. 응답에 `adopted`, `adopt_error`, `needs_robot_restart`, `backup`, `map_revision` |
+| `POST /api/mapping/adopt` | 저장은 됐는데 채택이 보류된 경우(주문 진행 중) 다시 시도 |
+| `GET /api/stores/{id}/map/backups` | 채택 전 지도 백업 목록(`data/map_backups/<store>/<날짜>/`: map/, semantics.json) |
+
+- 매핑 중에는 새 주문을 `409 MAPPING_BUSY`로 거절(대기열에 쌓지 않음)하고, 유휴 복귀·배차도 멈춘다.
+- 채택은 주문이 진행 중이면 `409 ORDERS_ACTIVE`. 채택하면 지도 revision이 1 오르고 편집기는 새 지도에서 빈 상태로 시작(이전 초안은 백업에 보관).
+- 로봇은 지도 이미지를 시작할 때만 읽으므로 채택 후 로봇을 재시작해야 한다(`needs_robot_restart`).
+- 설정(`fleet.yaml`): `mapping_enabled`, `mapping_work_dir`, `mapping_runner`, `mapping_ros_python`, `mapping_require_ros_env`, `mapping_shift_origin`(시뮬 `[-3.2, -2.4]`, 실제 매장 `[0, 0]`).
 
 ## 지도 설정(Semantic Map) 저장과 자동 노드 적용
 저장본은 두 단계예요. **초안**은 편집 화면에서 저장한 그대로(`data/semantics/<store>.json`), **적용**은 그 초안에서

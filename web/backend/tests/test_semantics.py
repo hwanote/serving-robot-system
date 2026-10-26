@@ -258,8 +258,9 @@ def test_site_builder_missing_is_503(client, base, tmp_path):
     assert client.get(URL + '/status').json()['draft']          # still saved
 
 
-def test_mapping_commands_stay_501(client):
-    assert client.post('/api/mapping/start').status_code == 501
+def test_mapping_start_is_off_unless_enabled(client):
+    r = client.post('/api/mapping/start')
+    assert r.status_code == 503 and r.json()['code'] == 'MAPPING_DISABLED'
 
 
 # ---- table top size (top_size_m) ------------------------------------------------------
@@ -491,3 +492,29 @@ def test_a_good_manual_stop_can_be_applied(client, base):
     assert r.status_code == 200, r.text
     g = client.get(URL + '/graph').json()
     assert g['matches_applied'] is True and stop_of(g, 'table_01')['pinned'] is True
+
+
+def test_a_drawn_kitchen_is_named_kitchen_for_the_robot_side(client, base):
+    d = copy.deepcopy(base)
+    for e in d['entities']:
+        if e['id'] == 'kitchen':
+            e['id'] = 'kitchen_01'
+    for w in d['waypoints']:
+        if w['entity_id'] == 'kitchen':
+            w['entity_id'] = 'kitchen_01'
+            w['id'] = 'wp_kitchen_01'
+    res = client.put(URL + '?apply=true', json=d).json()['apply_result']
+    assert any('kitchen_01' in n and 'kitchen' in n for n in res['notes'])
+    gen = client.app.state.semantics._gen_dir
+    text = open(os.path.join(gen, 'waypoints.yaml'), encoding='utf-8').read()
+    assert 'kitchen:' in text and 'kitchen_01' not in text
+
+
+def test_only_the_first_of_two_kitchens_is_named_kitchen():
+    from app.semantics import _label_id, _main_kitchen_id
+    doc = {'entities': [{'id': 'kitchen_02', 'type': 'kitchen'}, {'id': 'kitchen_03', 'type': 'kitchen'}]}
+    kid = _main_kitchen_id(doc)
+    assert [_label_id(e, kid) for e in doc['entities']] == ['kitchen', 'kitchen_03']
+    doc['entities'].append({'id': 'kitchen', 'type': 'kitchen'})
+    kid = _main_kitchen_id(doc)
+    assert [_label_id(e, kid) for e in doc['entities']] == ['kitchen_02', 'kitchen_03', 'kitchen']

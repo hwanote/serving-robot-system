@@ -25,10 +25,15 @@ class FakeAdapter:
         self.received = []      # commands that reached the robot
         self.localization = 'OK'     # test hook: 'LOST' etc.
         self.config_revision = self._live_revision()   # the map it was started with
+        self.map_image = self._live_map_image()        # the map picture it was started with
 
     def _live_revision(self):
         from ..promote import live_revision
         return live_revision(self.site.repo) or ''
+
+    def _live_map_image(self):
+        from ..promote import live_map_image
+        return live_map_image(self.site.repo, self.site.store_id) or ''
 
     def start(self, sink):
         self.sink, self.running = sink, True
@@ -72,7 +77,7 @@ class FakeAdapter:
         return {'state': self.state, 'mission_id': self.mission_id, 'destination': dest,
                 'serve': bool(self.table), 'table': self.table, 'result': self.result,
                 'code': self.code, 'leg': 1, 'legs': 1, 'localization': self.localization, 'loc_hold': '',
-                'config_revision': self.config_revision,
+                'config_revision': self.config_revision, 'map_image': self.map_image,
                 'returning': False, 'node': self.last_node, 'next_edge': nxt, 'route': route}
 
     def _handle(self, cmd):

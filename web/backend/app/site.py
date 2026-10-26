@@ -53,17 +53,40 @@ class Site:
     def __init__(self, repo, store_id):
         self.store_id, self.repo = store_id, repo
         self._load_config()
-        mdir = os.path.join(repo, 'maps', 'stores', store_id)
-        self.map_yaml_path = os.path.join(mdir, 'map.yaml')
+        self.map_yaml_path = os.path.join(repo, 'maps', 'stores', store_id, 'map.yaml')
+        self.map_yaml, self.width, self.height, self.png = self._read_map()
+        self.revision = self._meta_revision() or 1
+        self._rebuild()
+
+    def _read_map(self):
+        """map.yaml + image of the store -> (yaml dict, width, height, png bytes)."""
         with open(self.map_yaml_path, encoding='utf-8') as f:
-            self.map_yaml = yaml.safe_load(f)
-        img = Image.open(os.path.join(mdir, self.map_yaml.get('image', 'map.pgm'))).convert('L')
-        self.width, self.height = img.size
+            meta = yaml.safe_load(f)
+        image = os.path.join(os.path.dirname(self.map_yaml_path), meta.get('image', 'map.pgm'))
+        img = Image.open(image).convert('L')
         buf = io.BytesIO()
         img.save(buf, format='PNG')
-        self.png = buf.getvalue()
-        self.revision = 1
-        self._rebuild()
+        return meta, img.size[0], img.size[1], buf.getvalue()
+
+    def _meta_revision(self):
+        """map_revision of maps/stores/<store>/map_meta.yaml (None when missing or unreadable).
+        The adoption of a new map writes it, so the number survives a restart of the backend."""
+        try:
+            with open(os.path.join(os.path.dirname(self.map_yaml_path), 'map_meta.yaml'),
+                      encoding='utf-8') as f:
+                v = (yaml.safe_load(f) or {}).get('map_revision')
+            return int(v) if int(v) >= 1 else None
+        except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError):
+            return None
+
+    def reload_map_image(self):
+        """The store's map image was replaced (adoption of a new mapping): read map.yaml and the
+        image again and raise the revision, so a Semantic Map drawn on the old map is refused.
+        Config/common (nodes, tables) is not touched. A broken file leaves the old map in place."""
+        self.map_yaml, self.width, self.height, self.png = self._read_map()
+        meta = self._meta_revision()
+        self.revision = meta if meta and meta > self.revision else self.revision + 1
+        self.semantics = self._build_semantics()
 
     def _load_config(self):
         cfg = os.path.join(self.repo, 'config', 'common')

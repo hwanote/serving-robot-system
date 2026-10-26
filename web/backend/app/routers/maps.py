@@ -2,22 +2,136 @@ from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 
+from ..mapping.session import MappingError
 from ..semantics import SemanticError, validate
 from .errors import err
 
 router = APIRouter()
 
 
+def _mapping_err(e):
+    return err(e.status, e.code, e.message, e.details)
+
+
+def _mapping_status(state):
+    st = state.mapping.status()
+    st['saved'] = state.mapping.saved
+    st['last_saved_revision'] = state.site.revision      # revision of the map the store has now
+    return st
+
+
 @router.get('/api/mapping/status')
 def mapping_status(request: Request):
-    site = request.app.state.site
-    return {'store_id': site.store_id, 'phase': 'idle', 'started_at': None,
-            'last_saved_revision': site.revision}
+    return _mapping_status(request.app.state)
 
 
-@router.post('/api/mapping/{command}')
-def mapping_command(command: str):
-    return err(501, 'NOT_SUPPORTED', '이 백엔드는 아직 매핑을 지원하지 않습니다.')
+@router.post('/api/mapping/start')
+async def mapping_start(request: Request):
+    state = request.app.state
+    try:
+        await run_in_threadpool(state.mapping.start, state.fleet.is_busy)
+    except MappingError as e:
+        return _mapping_err(e)
+    return _mapping_status(state)
+
+
+@router.post('/api/mapping/stop')
+async def mapping_stop(request: Request):
+    state = request.app.state
+    try:
+        await run_in_threadpool(state.mapping.stop)
+    except MappingError as e:
+        return _mapping_err(e)
+    return _mapping_status(state)
+
+
+@router.post('/api/mapping/discard')
+async def mapping_discard(request: Request):
+    state = request.app.state
+    try:
+        await run_in_threadpool(state.mapping.discard)
+    except MappingError as e:
+        return _mapping_err(e)
+    return _mapping_status(state)
+
+
+async def _save_and_adopt(state, body):
+    """Save Map: finalize the corrections, then make the result the store's map.
+    If only the adoption is refused (orders running) the saved result is kept and
+    POST /api/mapping/adopt can be pressed again later."""
+    try:
+        review = await run_in_threadpool(state.mapping.save_review, body)
+    except MappingError as e:
+        return _mapping_err(e)
+    out = {'review_result': review, 'adopted': False, 'adopt_error': None}
+    try:
+        out.update(await run_in_threadpool(state.adopter.adopt))
+    except SemanticError as e:
+        out['adopt_error'] = {'code': e.code, 'message': e.message}
+    return {**_mapping_status(state), **out}
+
+
+@router.post('/api/mapping/adopt')
+async def mapping_adopt(request: Request):
+    state = request.app.state
+    try:
+        result = await run_in_threadpool(state.adopter.adopt)
+    except SemanticError as e:
+        return _semantic_err(e)
+    return {**_mapping_status(state), **result}
+
+
+@router.post('/api/mapping/save')
+async def mapping_save(request: Request):
+    try:
+        body = await request.json()
+    except ValueError:
+        return err(422, 'INVALID_JSON', 'Save Map에는 보정 내용과 최종 확인이 필요합니다.')
+    return await _save_and_adopt(request.app.state, body)
+
+
+def _review(store_id, state):
+    if store_id != state.site.store_id:
+        raise MappingError(404, 'NO_MAP', '매장을 찾지 못했어요.')
+    return state.mapping.review_service()
+
+
+@router.get('/api/stores/{store_id}/map-review')
+async def review_info(store_id: str, request: Request):
+    try:
+        service = _review(store_id, request.app.state)
+        return await run_in_threadpool(service.describe)
+    except MappingError as e:
+        return _mapping_err(e)
+
+
+@router.get('/api/stores/{store_id}/map-review.png')
+async def review_image(store_id: str, request: Request):
+    try:
+        service = _review(store_id, request.app.state)
+        data = await run_in_threadpool(service.preview_png)
+    except MappingError as e:
+        return _mapping_err(e)
+    return Response(data, media_type='image/png')
+
+
+@router.post('/api/stores/{store_id}/map-review/finalize')
+async def review_finalize(store_id: str, request: Request):
+    """Same as POST /api/mapping/save (kept for the mapping team's panel)."""
+    if store_id != request.app.state.site.store_id:
+        return err(404, 'NO_MAP', '매장을 찾지 못했어요.')
+    try:
+        body = await request.json()
+    except ValueError:
+        return err(400, 'INVALID_JSON', 'JSON 형식이 아닙니다.')
+    return await _save_and_adopt(request.app.state, body)
+
+
+@router.get('/api/stores/{store_id}/map/backups')
+def map_backups(store_id: str, request: Request):
+    if store_id != request.app.state.site.store_id:
+        return err(404, 'NO_MAP', '저장된 지도가 없습니다.')
+    return request.app.state.adopter.list_backups()
 
 
 @router.get('/api/stores/{store_id}/map')

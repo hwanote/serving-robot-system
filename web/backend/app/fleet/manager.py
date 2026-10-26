@@ -47,9 +47,11 @@ class FleetManager:
         self.last_dispatch = -1e9
         self.home_count = 0
         self.live_revision = lambda: None     # set by the app: revision of config/common
+        self.live_map_image = lambda: None    # set by the app: fingerprint of the store's map picture
         self.wait_reason = ''
         self.log = []
         self.dispatch_paused = False
+        self.mapping_active = lambda: False   # set by the app: True while the robot is mapping
 
     def is_busy(self):
         """True while an order is waiting or a robot is driving one (or going home)."""
@@ -127,6 +129,7 @@ class FleetManager:
                 'online': not r.offline, 'accepting_orders': not r.paused,
                 'localization': (r.ms or {}).get('localization') or None,
                 'map_current': self._map_current(r), 'controls': self._controls(r),
+                'map_image_current': self._map_image_current(r),
                 'pose': {'x': round(r.pose[0], 3), 'y': round(r.pose[1], 3),
                          'yaw': round(r.pose[2], 4)}}
 
@@ -135,6 +138,15 @@ class FleetManager:
         """True: the robot runs the map that is in config/common now. None: unknown
         (an older robot node does not report it)."""
         have, live = (r.ms or {}).get('config_revision'), self.live_revision()
+        if not have or not live:
+            return None
+        return have == live
+
+    def _map_image_current(self, r):
+        """True: the robot loaded the map picture the store has now. False: the picture changed
+        after the robot started (it must be restarted; "read the map again" cannot fix it).
+        None: unknown (an older robot node does not report it)."""
+        have, live = (r.ms or {}).get('map_image'), self.live_map_image()
         if not have or not live:
             return None
         return have == live
@@ -272,6 +284,8 @@ class FleetManager:
                 and not ms.get('returning'))
 
     def _dispatch(self):
+        if self.mapping_active():
+            return                     # the robot is mapping: no idle-home, no dispatch
         self._idle_home()
         if not self.queue:
             return
@@ -285,8 +299,14 @@ class FleetManager:
         free = [r for r in self.robots.values()
                 if r.active is None and not r.homing and r.pose is not None and r.ms
                 and r.ms.get('state') == 'IDLE' and not r.offline and not r.paused
-                and self._ready(r)]
+                and self._ready(r) and self._map_image_current(r) is not False]
         if not free:
+            stale = [r.name for r in self.robots.values() if self._map_image_current(r) is False]
+            if stale and self.queue:
+                reason = 'orders wait: %s must be restarted (the map picture changed)' % ', '.join(stale)
+                if reason != self.wait_reason:
+                    self.wait_reason = reason
+                    self.note(reason)
             return
         free.sort(key=lambda x: math.hypot(x.pose[0] - self.kitchen_xy[0],
                                            x.pose[1] - self.kitchen_xy[1]))
@@ -390,6 +410,7 @@ class FleetManager:
                 r.offline, r.offline_since = True, now
                 self.note('%s OFFLINE (no message for %.0f s)' % (r.name, now - r.last_seen))
                 self.repo.add_event('robot_offline', {'robot_id': r.name, 'at': now_iso()})
+            self._expire_homing(r, now)
             t = self.repo.get_task(r.active) if r.active else None
             if not t:
                 continue
@@ -398,6 +419,18 @@ class FleetManager:
             elif (t['status'] == 'ASSIGNED' and not r.offline
                   and now - r.assigned_at > self.cfg.ack_timeout_s):
                 self._fail_active(r, t, 'COMMAND_NOT_ACKED')
+
+    def _expire_homing(self, r, now):
+        """Let go of a 'going home' mark that can no longer be finished. The mark used to
+        end only when a status message arrived, so a robot that never took the command (or
+        went silent) kept the whole fleet 'busy' (map adoption refused) until a restart."""
+        if not r.homing:
+            return
+        if r.offline:
+            self.note('%s offline: forgetting the home trip %s' % (r.name, r.homing))
+            r.homing = None
+        elif (r.ms or {}).get('mission_id') != r.homing and now - (r.homing_at or now) > 5.0:
+            r.homing = None                       # the robot never took it
 
     def _fail_active(self, r, t, code):
         self.note('%s: task %s failed (%s)' % (r.name, t['task_id'], code))

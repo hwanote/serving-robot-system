@@ -89,6 +89,37 @@ def live_revision(repo):
     return rev
 
 
+_IMG_CACHE = {}
+
+
+def live_map_image(repo, store_id):
+    """Fingerprint of maps/stores/<store>/map.yaml + its image, as the robots compute it
+    (mission_status.map_image) so the two can be compared. None when it cannot be read.
+    A robot that started before the map picture changed reports an older value."""
+    mdir = os.path.join(repo, 'maps', 'stores', store_id)
+    yml = os.path.join(mdir, 'map.yaml')
+    try:
+        key = tuple((os.stat(p).st_mtime_ns, os.stat(p).st_size)
+                    for p in (yml, os.path.join(mdir, 'map.pgm')))
+    except OSError:
+        return None
+    hit = _IMG_CACHE.get(yml)
+    if hit and hit[0] == key:
+        return hit[1]
+    nav = os.path.join(repo, 'ros_ws', 'src', 'serving_robot_navigation')
+    if not os.path.isdir(nav):
+        return None
+    if nav not in sys.path:
+        sys.path.insert(0, nav)
+    try:
+        from serving_robot_navigation.site_config import map_image_fingerprint
+        value = map_image_fingerprint(yml) or None
+    except Exception:
+        return None
+    _IMG_CACHE[yml] = (key, value)
+    return value
+
+
 class LiveConfig:
     def __init__(self, site, fleet, repo, data_dir):
         self.site, self.fleet, self.repo, self.data_dir = site, fleet, repo, data_dir
@@ -131,7 +162,7 @@ class LiveConfig:
                 'matches_applied': bool(live_sha and live_sha == gen_sha),
                 'applied_source_sha': (applied or {}).get('source_sha'),
                 'last': _read_json(self._live_path), 'backup_count': len(self.list_backups()),
-                'needs_robot_restart_note': '로봇은 지도를 시작할 때와 "지도 다시 읽기" 명령을 받았을 때만 읽어요. 반영 후 로봇 관제 화면에서 눌러 주세요.'}
+                'needs_robot_restart_note': '노드·통로·테이블 위치는 로봇 관제 화면의 "지도 다시 읽기"로 바뀌어요. 지도 그림(map.pgm)이 바뀐 경우에는 다시 읽기로는 안 되고 로봇을 재시작해야 해요.'}
 
     def list_backups(self):
         out = []

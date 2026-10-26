@@ -155,11 +155,22 @@ def digest(doc):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
 
 
-def _label_id(e):
-    """Id of the site_builder label made from entity e (robot_wait_NN becomes standby_NN: the
-    names the robot side expects)."""
+def _main_kitchen_id(doc):
+    """Id of the entity that becomes the pickup named 'kitchen': the one already called that,
+    else the first kitchen (the robots and the backend look the pickup up by that name)."""
+    kitchens = [e['id'] for e in doc['entities'] if e['type'] == 'kitchen']
+    if 'kitchen' in kitchens:
+        return 'kitchen'
+    return kitchens[0] if kitchens else None
+
+
+def _label_id(e, kitchen_id=None):
+    """Id of the site_builder label made from entity e (robot_wait_NN becomes standby_NN and the
+    kitchen becomes 'kitchen': the names the robot side expects)."""
     if e['type'] == 'robot_wait' and e['id'].startswith('robot_wait_'):
         return 'standby_' + e['id'][len('robot_wait_'):]
+    if e['type'] == 'kitchen' and kitchen_id is not None and e['id'] == kitchen_id:
+        return 'kitchen'
     return e['id']
 
 
@@ -167,6 +178,7 @@ def to_labels(doc):
     """Semantic Map -> site_builder labels. Returns (labels document, notes)."""
     wp = {w['entity_id']: w for w in doc['waypoints']}
     has_kitchen = any(e['type'] == 'kitchen' for e in doc['entities'])
+    kitchen_id = _main_kitchen_id(doc)
     labels, notes, no_pose, no_top = [], [], [], []
     for e in doc['entities']:
         if e['type'] == 'counter' and has_kitchen:
@@ -177,7 +189,7 @@ def to_labels(doc):
             no_pose.append(e['id'])
             continue
         kind = LABEL_KIND[e['type']]
-        lid = _label_id(e)
+        lid = _label_id(e, kitchen_id)
         if lid != e['id']:
             notes.append('%s 는 %s 로 이름을 바꿔 생성했어요.' % (e['id'], lid))
         lab = {'id': lid, 'kind': kind, 'x_m': float(pose['x']), 'y_m': float(pose['y'])}
@@ -363,7 +375,8 @@ class SemanticStore:
         pv = sb_pipeline.to_preview(res)
         fails, excluded, lines = self._collect_problems(res, pv)
         notes = notes + _approach_notes(pv.get('approach') or {})
-        entity_of = {_label_id(e): e['id'] for e in doc['entities']}
+        kitchen_id = _main_kitchen_id(doc)
+        entity_of = {_label_id(e, kitchen_id): e['id'] for e in doc['entities']}
         applied = _read_json(os.path.join(self._gen_dir, 'applied.json'))
         sha = digest(doc)
         stops = []

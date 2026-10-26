@@ -15,6 +15,8 @@ class OrderService:
         """Validate an order body and queue the task. -> (task dict, created)"""
         if not isinstance(body, dict):
             raise OrderError(400, 'BAD_BODY', '요청 본문이 올바르지 않습니다.')
+        if self.fleet.mapping_active():
+            raise OrderError(409, 'MAPPING_BUSY', '지도를 만드는 중이라 주문을 받을 수 없어요. 매핑이 끝난 뒤에 시도해 주세요.')
         if body.get('type') != 'SERVE':
             raise OrderError(400, 'UNSUPPORTED_TYPE', '지원하지 않는 Task 타입입니다: %s' % body.get('type'))
         bad = [k for k in FORBIDDEN_KEYS if k in body]

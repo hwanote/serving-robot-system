@@ -133,3 +133,29 @@ def test_reload_map_refused_while_busy_or_unknown(client):
     r = client.post('/api/robots/%s/reload-map' % busy[0]['robot_id'])
     assert r.status_code == 409 and r.json()['code'] == 'ROBOT_BUSY'
     assert busy[0]['controls']['reload_map'] is False
+
+
+def test_stale_home_trip_does_not_keep_the_fleet_busy(client):
+    """A 'going home' mark that never finishes must not block map adoption forever."""
+    fleet = client.app_.state.fleet
+    r = fleet.robots['robot_01']
+    with fleet.lock:
+        r.homing, r.homing_at = 'home-9999', time.monotonic() - 10     # robot never took it
+        assert fleet.is_busy()
+        fleet._watch()
+        assert r.homing is None and not fleet.is_busy()
+        r.homing, r.homing_at, r.offline = 'home-9998', time.monotonic(), True   # went silent
+        fleet._watch()
+        assert r.homing is None
+        r.offline = False
+
+
+def test_running_home_trip_is_kept(client):
+    fleet = client.app_.state.fleet
+    r = fleet.robots['robot_01']
+    with fleet.lock:
+        r.homing, r.homing_at = 'home-9997', time.monotonic()           # fresh: still waiting
+        r.ms = dict(r.ms or {}, mission_id='home-9997')
+        fleet._watch()
+        assert r.homing == 'home-9997' and fleet.is_busy()
+        r.homing = None

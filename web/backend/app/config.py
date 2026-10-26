@@ -59,6 +59,15 @@ class Settings:
     # map setup (saved Semantic Map, automatic nodes)
     data_dir: str = ''                 # '' = web/backend/data
     require_drive_test: bool = False   # apply needs a passed drive test (the tool is not wired yet)
+    # automatic mapping (the ROS mapping stack is started by a person; the backend only runs the session script)
+    mapping_enabled: bool = False      # off: Start Mapping answers 503 MAPPING_DISABLED
+    mapping_work_dir: str = ''         # '' = <data_dir>/mapping (sessions, drafts, outputs, state.json)
+    mapping_runner: str = ''           # '' = ros_ws/src/serving_robot_mapping/tools/run_lidar_mapping_session.py
+    mapping_ros_python: str = '/usr/bin/python3'
+    mapping_require_ros_env: bool = True   # ROS_DISTRO must be jazzy (a source'd terminal)
+    # SLAM map frame starts at the robot's start pose. Simulation: the Gazebo spawn pose
+    # (-3.2, -2.4) so the map lines up with the world; a real store: 0, 0 (M-19)
+    mapping_shift_origin: list = field(default_factory=lambda: [0.0, 0.0])
     # fake adapter
     fake_speed: float = 1.0
     fake_wait: float = 2.0

@@ -41,7 +41,7 @@ def test_validation(client):
 def test_maps(client):
     assert client.get('/api/stores/demo_store/map.png').status_code == 200
     assert client.get('/api/stores/other/map').status_code == 404
-    assert client.post('/api/mapping/start').status_code == 501
+    assert client.post('/api/mapping/start').status_code == 503   # mapping is off unless mapping_enabled
 
 
 def test_order_runs_to_success(client):
