@@ -26,3 +26,7 @@ rosbag2_*/
 # Generated temporary maps
 ros_ws/src/serving_robot_navigation/maps/generated/*
 !ros_ws/src/serving_robot_navigation/maps/generated/.gitkeep
+
+# Release archives and generated tool results
+dist/
+tools/site_builder/out/

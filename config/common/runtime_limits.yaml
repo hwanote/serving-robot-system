@@ -1,0 +1,137 @@
+# Runtime limits shared by the robot, fleet and web parts.
+# Units: SI with suffixes (_mps, _rps, _s, _m). Single source of truth -
+# do not hard-code or copy these values elsewhere.
+schema_version: 1
+
+# --- Agreed team contract (autonomy part design doc, section 8) -------------
+max_linear_mps: 0.25
+max_angular_rps: 0.80
+
+slow_linear_mps: 0.10
+
+cmd_vel_timeout_s: 0.50
+
+person_slow_distance_m: 1.50
+person_stop_distance_m: 0.80
+
+# --- Proposed addition (NOT yet agreed with the team) -----------------------
+# Live-sensing reaction range for generic dynamic obstacles (chairs, belongings,
+# people): an obstacle detected within this distance triggers a response.
+# Separate from the person SLOW/STOP distances above.
+# TODO: distance-tier scenarios (which response at which distance) later.
+# The sensor's own maximum range is a separate, undecided setting
+# (LiDAR is currently modelled with a 12 m maximum range).
+# Ride comfort for carrying drinks (proposed, not yet agreed with the team).
+# Used by the velocity smoother and by the soft-stop behaviour.
+motion_comfort:
+  max_linear_accel_mps2: 0.40
+  max_linear_decel_mps2: 0.40
+  max_angular_accel_rps2: 0.80
+  soft_stop_decel_mps2: 0.30
+
+obstacle_reaction:
+  reaction_distance_m: 3.0
+  # Last-defence stop: anything this close to the robot body (any direction)
+  # stops the robot. The normal stop distance is person_stop_distance_m for now
+  # (people and generic obstacles are not told apart before the camera step).
+  hard_stop_distance_m: 0.10
+  # Resume rule after a stop for an obstacle: drive on only when nothing is
+  # within resume_clear_distance_m in front of the body for resume_hold_s.
+  # (Driving on is then capped by the slow zone: slow_linear_mps while an
+  # obstacle is still within person_slow_distance_m.)
+  resume_clear_distance_m: 1.0
+  resume_hold_s: 2.0
+  # Collision latch: after the contact sensor reports a touch the robot stays
+  # stopped until the restart service is called. The service is refused until
+  # this many seconds have passed since the last touch.
+  collision_release_s: 3.0
+
+# Response when an obstacle keeps the robot stopped (proposed, not yet agreed
+# with the team). The clock is the simulation clock; time stopped by a
+# collision latch is not counted.
+#   stopped alarm_after_s            -> alarm (the robot keeps waiting)
+#   stopped detour_after_s           -> look for another straight corridor
+# A corridor that was found blocked is avoided for blocked_memory_s; at most
+# max_detours detours per destination; with no detour available the robot
+# waits (alarm) and looks again every replan_interval_s.
+# "Stopped" = a stop signal (obstacle hold, person STOP) OR not moving: while
+# driving, no move of stall_move_m and no turn of stall_turn_rad for
+# stall_window_s (something holds the robot without telling).
+blocked_response:
+  alarm_after_s: 15.0
+  detour_after_s: 30.0
+  blocked_memory_s: 60.0
+  max_detours: 3
+  replan_interval_s: 5.0
+  stall_window_s: 3.0
+  stall_move_m: 0.05
+  stall_turn_rad: 0.15
+
+# Straight rail (proposed, not yet agreed with the team). Every leg along the
+# route graph is a straight path (a pose every step_m) followed by the Nav2
+# controller, never replanned around an obstacle: the robot stops in front of
+# it. More than off_rail_m from the line: stop (alarm OFF_RAIL), wait resume_s,
+# drive on straight from there.
+rail:
+  step_m: 0.05
+  off_rail_m: 0.15
+  resume_s: 3.0
+
+# Localization loss (route executor). Proposal: confirm with the team.
+# The executor reads localization_state from /robot_01/health (judged by the
+# health node with the thresholds in `health` below). LOST while driving: stop and
+# hold the mission (alarm LOCALIZATION_LOST). The state must be out of LOST (OK or
+# DEGRADED) for recover_stable_s before the operator is asked
+# (LOCALIZATION_RECOVERED) to send "resume" or "home": a stopped robot cannot make
+# AMCL more certain, so waiting for OK could last forever. LOST / UNINITIALIZED
+# also refuse new orders. A health
+# message older than health_max_age_s counts as unknown: nothing is stopped for it.
+localization_hold:
+  recover_stable_s: 2.0
+  health_max_age_s: 3.0
+
+# Serving sequence and delivery anomaly (route executor). Proposal: confirm with the team.
+delivery:
+  delivery_limit_s: 180.0    # kitchen departure -> table arrival (collision time excluded)
+  handover_timeout_s: 60.0   # nobody takes the order: alarm, keep waiting
+  wait_repeat_s: 30.0        # waiting alarms repeat this often
+  auto_confirm_s: 0.0        # >0 only for tests: confirm load/handover by itself
+
+# Speed limit from the person state (person_speed_limiter). Proposal: confirm with the team.
+# NORMAL passes, SLOW limits to slow_linear_mps (agreed above) and slow_angular_rps,
+# STOP gives zero. No person state for message_timeout_s (detector dead / not started)
+# or SENSOR_STALE limits like SLOW and raises a warning.
+person_safety:
+  slow_angular_rps: 0.40
+  message_timeout_s: 1.0
+  # Operator alarm DETECTOR_SILENT when the person detector says nothing (after it spoke
+  # once: message_timeout_s; never spoke: detector_startup_grace_s), repeated every
+  # detector_alarm_repeat_s. While it is silent the robot keeps driving (LiDAR protects):
+  # a last STOP holds only while the LiDAR sees something ahead, else the SLOW limit.
+  detector_startup_grace_s: 30.0
+  detector_alarm_repeat_s: 30.0
+  # Several cameras (step 4): direction of a person seen from the robot.
+  # Ahead (|bearing| <= front_half_angle_deg): the SLOW / STOP distances above.
+  # Beside (up to side_max_angle_deg): closer than side_slow_distance_m -> SLOW only,
+  # released after side_release_s clear. Behind: no effect (the robot never reverses).
+  cameras: [camera_front, camera_rear_left, camera_rear_right]   # names in interfaces.yaml
+  primary_camera: camera_front     # drives the state (and the detector-silent rule)
+  front_half_angle_deg: 60.0
+  side_max_angle_deg: 120.0
+  side_slow_distance_m: 0.8
+  side_release_s: 1.0
+
+# Robot health summary (/robot_01/health, robot_health node). Proposal: confirm
+# with the team (the enums are the integration guide's, Q3-3). Localization from
+# the AMCL covariance (standard deviation): OK up to ok_std_m and ok_std_rad,
+# DEGRADED above, LOST from lost_std_m or with no map -> base pose for pose_lost_s.
+# BLOCKED uses blocked_response.alarm_after_s.
+health:
+  boot_timeout_s: 60.0
+  scan_stale_s: 2.0
+  odom_stale_s: 2.0
+  msg_stale_s: 2.0
+  pose_lost_s: 2.0
+  ok_std_m: 0.25
+  ok_std_rad: 0.20
+  lost_std_m: 1.0

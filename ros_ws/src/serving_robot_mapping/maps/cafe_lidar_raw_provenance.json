@@ -1,0 +1,15 @@
+{
+  "map_type": "autonomous_lidar_raw",
+  "exploration_outcome": "COVERAGE_LIMITED",
+  "autonomous_map_complete": false,
+  "manual_wall_edits_applied": false,
+  "source_map": "/mnt/c/dev/finalpj/mapping-run-logs/R16-147_official_raw_map.yaml",
+  "source_pgm_sha256": "f6b02b676d07bbda9d98c00497d8a04aa87ca11cf36365f6d07ae73f6dd760fc",
+  "deployment_map": "/mnt/c/dev/finalpj/serving-robot-system/ros_ws/src/serving_robot_mapping/maps/cafe_lidar_raw.yaml",
+  "deployment_pgm_sha256": "f6b02b676d07bbda9d98c00497d8a04aa87ca11cf36365f6d07ae73f6dd760fc",
+  "map_server_loaded_source": true,
+  "saved_map_path_centerline_checks": 3,
+  "saved_map_path_centerline_passes": 3,
+  "static_map_planner_verified": false,
+  "robot_footprint_route_verified": false
+}

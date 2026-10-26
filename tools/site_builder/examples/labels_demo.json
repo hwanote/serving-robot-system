@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "labels": [
+    {"id": "standby_01", "kind": "standby", "x_m": -3.20, "y_m": -2.40},
+    {"id": "kitchen", "kind": "pickup", "x_m": -2.30, "y_m": 2.40},
+    {"id": "table_01", "kind": "table", "x_m": -1.60, "y_m": 0.65,
+     "chairs": [{"dx": -0.65, "dy": 0.0, "size_m": 0.45}, {"dx": 0.65, "dy": 0.0, "size_m": 0.45}]},
+    {"id": "table_02", "kind": "table", "x_m": 1.55, "y_m": 0.65,
+     "chairs": [{"dx": -0.65, "dy": 0.0, "size_m": 0.45}, {"dx": 0.65, "dy": 0.0, "size_m": 0.45}]},
+    {"id": "table_03", "kind": "table", "x_m": -1.60, "y_m": -1.45,
+     "chairs": [{"dx": -0.65, "dy": 0.0, "size_m": 0.45}, {"dx": 0.65, "dy": 0.0, "size_m": 0.45}]},
+    {"id": "table_04", "kind": "table", "x_m": 1.55, "y_m": -1.45,
+     "chairs": [{"dx": -0.65, "dy": 0.0, "size_m": 0.45}, {"dx": 0.65, "dy": 0.0, "size_m": 0.45}]}
+  ]
+}

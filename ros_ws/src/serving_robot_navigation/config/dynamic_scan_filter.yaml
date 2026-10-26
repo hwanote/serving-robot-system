@@ -1,0 +1,14 @@
+# Removes laser points that hit KNOWN obstacles (fixed objects of the map) so the
+# collision monitor's stop / slow zones react only to what the map does not know.
+# The map must contain fixed objects only (no chairs, people, belongings).
+dynamic_scan_filter:
+  ros__parameters:
+    # scan_topic / output_topic come from config/common/interfaces.yaml
+    # (set them here only to override)
+    map_topic: "/map"
+    map_frame: "map"
+    # A laser point within this distance of an occupied map cell counts as a
+    # known obstacle. Keep it above the localization error: if the estimated
+    # pose is off by more than this, wall points show up as "unknown" again.
+    tolerance_m: 0.10
+    occupied_threshold: 65

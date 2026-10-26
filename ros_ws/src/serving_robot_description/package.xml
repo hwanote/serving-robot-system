@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<package format="3">
+
+  <name>serving_robot_description</name>
+  <version>0.1.0</version>
+
+  <description>
+    Robot description, URDF/Xacro, meshes, and visualization resources
+    for the serving robot system.
+  </description>
+
+  <maintainer email="notihwan08@gmail.com">hwanote</maintainer>
+
+  <license>TODO</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <exec_depend>xacro</exec_depend>
+
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher_gui</exec_depend>
+
+  <exec_depend>rviz2</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>

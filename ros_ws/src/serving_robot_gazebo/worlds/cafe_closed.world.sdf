@@ -1,0 +1,876 @@
+<?xml version="1.0"?>
+
+<sdf version="1.9">
+
+  <world name="cafe">
+
+    <!-- ======================================================= -->
+    <!-- Physics                                                  -->
+    <!-- ======================================================= -->
+
+    <physics name="default_physics" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+
+    <!-- ======================================================= -->
+    <!-- Gazebo systems                                           -->
+    <!-- ======================================================= -->
+
+    <plugin
+      filename="gz-sim-physics-system"
+      name="gz::sim::systems::Physics">
+    </plugin>
+
+    <plugin
+      filename="gz-sim-user-commands-system"
+      name="gz::sim::systems::UserCommands">
+    </plugin>
+
+    <plugin
+      filename="gz-sim-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster">
+    </plugin>
+
+    <!-- Needed by the contact sensor (bumper) of the robot -->
+    <plugin
+      filename="gz-sim-contact-system"
+      name="gz::sim::systems::Contact">
+    </plugin>
+
+    <!-- Required later for GPU LiDAR / RGB-D sensors -->
+    <plugin
+      filename="gz-sim-sensors-system"
+      name="gz::sim::systems::Sensors">
+
+      <render_engine>ogre2</render_engine>
+
+    </plugin>
+
+
+    <!-- ======================================================= -->
+    <!-- Lighting                                                 -->
+    <!-- ======================================================= -->
+
+    <light type="directional" name="sun">
+
+      <pose>0 0 10 0 0 0</pose>
+
+      <cast_shadows>true</cast_shadows>
+
+      <diffuse>0.9 0.9 0.9 1.0</diffuse>
+      <specular>0.3 0.3 0.3 1.0</specular>
+
+      <direction>-0.5 0.3 -1.0</direction>
+
+    </light>
+
+
+    <!-- ======================================================= -->
+    <!-- Ground                                                   -->
+    <!-- ======================================================= -->
+
+    <model name="ground_plane">
+
+      <static>true</static>
+
+      <link name="ground_link">
+
+        <collision name="ground_collision">
+
+          <geometry>
+
+            <plane>
+              <normal>0 0 1</normal>
+              <size>12 10</size>
+            </plane>
+
+          </geometry>
+
+        </collision>
+
+
+        <visual name="ground_visual">
+
+          <geometry>
+
+            <plane>
+              <normal>0 0 1</normal>
+              <size>12 10</size>
+            </plane>
+
+          </geometry>
+
+          <material>
+            <ambient>0.70 0.70 0.68 1.0</ambient>
+            <diffuse>0.78 0.78 0.75 1.0</diffuse>
+          </material>
+
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <!-- ======================================================= -->
+    <!-- Cafe outer structure                                     -->
+    <!--                                                         -->
+    <!-- Interior size: approximately 8 m x 6 m                  -->
+    <!--                                                         -->
+    <!-- Entrance opening: south wall (CLOSED in this test world)   -->
+    <!-- ======================================================= -->
+
+    <model name="cafe_structure">
+
+      <static>true</static>
+
+      <link name="walls">
+
+
+        <!-- North wall -->
+
+        <collision name="north_wall_collision">
+
+          <pose>0 3.0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>8.12 0.12 2.50</size>
+            </box>
+          </geometry>
+
+        </collision>
+
+        <visual name="north_wall_visual">
+
+          <pose>0 3.0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>8.12 0.12 2.50</size>
+            </box>
+          </geometry>
+
+          <material>
+            <ambient>0.92 0.91 0.88 1.0</ambient>
+            <diffuse>0.92 0.91 0.88 1.0</diffuse>
+          </material>
+
+        </visual>
+
+
+        <!-- West wall -->
+
+        <collision name="west_wall_collision">
+
+          <pose>-4.0 0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>0.12 6.0 2.50</size>
+            </box>
+          </geometry>
+
+        </collision>
+
+        <visual name="west_wall_visual">
+
+          <pose>-4.0 0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>0.12 6.0 2.50</size>
+            </box>
+          </geometry>
+
+          <material>
+            <ambient>0.92 0.91 0.88 1.0</ambient>
+            <diffuse>0.92 0.91 0.88 1.0</diffuse>
+          </material>
+
+        </visual>
+
+
+        <!-- East wall -->
+
+        <collision name="east_wall_collision">
+
+          <pose>4.0 0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>0.12 6.0 2.50</size>
+            </box>
+          </geometry>
+
+        </collision>
+
+        <visual name="east_wall_visual">
+
+          <pose>4.0 0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>0.12 6.0 2.50</size>
+            </box>
+          </geometry>
+
+          <material>
+            <ambient>0.92 0.91 0.88 1.0</ambient>
+            <diffuse>0.92 0.91 0.88 1.0</diffuse>
+          </material>
+
+        </visual>
+
+
+        <!-- South-left wall -->
+
+        <collision name="south_left_wall_collision">
+
+          <pose>-1.8 -3.0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>4.40 0.12 2.50</size>
+            </box>
+          </geometry>
+
+        </collision>
+
+        <visual name="south_left_wall_visual">
+
+          <pose>-1.8 -3.0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>4.40 0.12 2.50</size>
+            </box>
+          </geometry>
+
+          <material>
+            <ambient>0.92 0.91 0.88 1.0</ambient>
+            <diffuse>0.92 0.91 0.88 1.0</diffuse>
+          </material>
+
+        </visual>
+
+
+        <!-- South-right wall -->
+
+        <collision name="south_right_wall_collision">
+
+          <pose>3.05 -3.0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>1.90 0.12 2.50</size>
+            </box>
+          </geometry>
+
+        </collision>
+
+        <visual name="south_right_wall_visual">
+
+          <pose>3.05 -3.0 1.25 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>1.90 0.12 2.50</size>
+            </box>
+          </geometry>
+
+          <material>
+            <ambient>0.92 0.91 0.88 1.0</ambient>
+            <diffuse>0.92 0.91 0.88 1.0</diffuse>
+          </material>
+
+        </visual>
+
+        <!-- Entrance closed (mapping test world only): fills the gap between
+             the south-left wall (x -4.0 .. 0.4) and the south-right wall
+             (x 2.1 .. 4.0). Brown so that it is easy to see in Gazebo. -->
+        <collision name="entrance_closed_wall_collision">
+          <pose>1.25 -3.0 1.25 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.72 0.12 2.50</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="entrance_closed_wall_visual">
+          <pose>1.25 -3.0 1.25 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.72 0.12 2.50</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.55 0.40 0.28 1.0</ambient>
+            <diffuse>0.55 0.40 0.28 1.0</diffuse>
+          </material>
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <!-- ======================================================= -->
+    <!-- Counter                                                  -->
+    <!--                                                         -->
+    <!-- Creates a narrow service aisle together with T01.       -->
+    <!-- ======================================================= -->
+
+    <model name="cafe_counter">
+
+      <static>true</static>
+
+      <pose>-2.30 2.40 0 0 0 0</pose>
+
+      <link name="counter_link">
+
+        <collision name="counter_collision">
+
+          <pose>0 0 0.50 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>2.50 0.70 1.00</size>
+            </box>
+          </geometry>
+
+        </collision>
+
+        <visual name="counter_visual">
+
+          <pose>0 0 0.50 0 0 0</pose>
+
+          <geometry>
+            <box>
+              <size>2.50 0.70 1.00</size>
+            </box>
+          </geometry>
+
+          <material>
+            <ambient>0.28 0.16 0.08 1.0</ambient>
+            <diffuse>0.45 0.27 0.12 1.0</diffuse>
+          </material>
+
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <!-- ======================================================= -->
+    <!-- Table set 01                                             -->
+    <!-- ======================================================= -->
+
+    <model name="table_set_01">
+
+      <static>true</static>
+
+      <pose>-1.60 0.65 0 0 0 0</pose>
+
+      <link name="furniture_link">
+
+        <collision name="table_pedestal_collision">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.09</radius>
+              <length>0.70</length>
+            </cylinder>
+          </geometry>
+        </collision>
+
+        <visual name="table_pedestal_visual">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.09</radius>
+              <length>0.70</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.22 0.22 0.22 1</ambient>
+            <diffuse>0.28 0.28 0.28 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="table_top_collision">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.80 0.80 0.08</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="table_top_visual">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.80 0.80 0.08</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.50 0.31 0.16 1</ambient>
+            <diffuse>0.60 0.38 0.18 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="chair_left_collision">
+          <pose>-0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="chair_left_visual">
+          <pose>-0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.25 0.32 1</ambient>
+            <diffuse>0.20 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="chair_right_collision">
+          <pose>0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="chair_right_visual">
+          <pose>0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.25 0.32 1</ambient>
+            <diffuse>0.20 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <!-- ======================================================= -->
+    <!-- Table set 02                                             -->
+    <!-- ======================================================= -->
+
+    <model name="table_set_02">
+
+      <static>true</static>
+
+      <pose>1.55 0.65 0 0 0 0</pose>
+
+      <link name="furniture_link">
+
+        <collision name="table_pedestal_collision">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.09</radius>
+              <length>0.70</length>
+            </cylinder>
+          </geometry>
+        </collision>
+
+        <visual name="table_pedestal_visual">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.09</radius>
+              <length>0.70</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.22 0.22 0.22 1</ambient>
+            <diffuse>0.28 0.28 0.28 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="table_top_collision">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.80 0.80 0.08</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="table_top_visual">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.80 0.80 0.08</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.50 0.31 0.16 1</ambient>
+            <diffuse>0.60 0.38 0.18 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="chair_left_collision">
+          <pose>-0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="chair_left_visual">
+          <pose>-0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.25 0.32 1</ambient>
+            <diffuse>0.20 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="chair_right_collision">
+          <pose>0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="chair_right_visual">
+          <pose>0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.25 0.32 1</ambient>
+            <diffuse>0.20 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <!-- ======================================================= -->
+    <!-- Table set 03                                             -->
+    <!-- ======================================================= -->
+
+    <model name="table_set_03">
+
+      <static>true</static>
+
+      <pose>-1.60 -1.45 0 0 0 0</pose>
+
+      <link name="furniture_link">
+
+        <collision name="table_pedestal_collision">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.09</radius>
+              <length>0.70</length>
+            </cylinder>
+          </geometry>
+        </collision>
+
+        <visual name="table_pedestal_visual">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.09</radius>
+              <length>0.70</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.22 0.22 0.22 1</ambient>
+            <diffuse>0.28 0.28 0.28 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="table_top_collision">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.80 0.80 0.08</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="table_top_visual">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.80 0.80 0.08</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.50 0.31 0.16 1</ambient>
+            <diffuse>0.60 0.38 0.18 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="chair_left_collision">
+          <pose>-0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="chair_left_visual">
+          <pose>-0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.25 0.32 1</ambient>
+            <diffuse>0.20 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="chair_right_collision">
+          <pose>0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="chair_right_visual">
+          <pose>0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.25 0.32 1</ambient>
+            <diffuse>0.20 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <!-- ======================================================= -->
+    <!-- Table set 04                                             -->
+    <!-- ======================================================= -->
+
+    <model name="table_set_04">
+
+      <static>true</static>
+
+      <pose>1.55 -1.45 0 0 0 0</pose>
+
+      <link name="furniture_link">
+
+        <collision name="table_pedestal_collision">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.09</radius>
+              <length>0.70</length>
+            </cylinder>
+          </geometry>
+        </collision>
+
+        <visual name="table_pedestal_visual">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.09</radius>
+              <length>0.70</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.22 0.22 0.22 1</ambient>
+            <diffuse>0.28 0.28 0.28 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="table_top_collision">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.80 0.80 0.08</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="table_top_visual">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.80 0.80 0.08</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.50 0.31 0.16 1</ambient>
+            <diffuse>0.60 0.38 0.18 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="chair_left_collision">
+          <pose>-0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="chair_left_visual">
+          <pose>-0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.25 0.32 1</ambient>
+            <diffuse>0.20 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="chair_right_collision">
+          <pose>0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+        </collision>
+
+        <visual name="chair_right_visual">
+          <pose>0.65 0 0.275 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.45 0.45 0.55</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.16 0.25 0.32 1</ambient>
+            <diffuse>0.20 0.34 0.44 1</diffuse>
+          </material>
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <!-- ======================================================= -->
+    <!-- Fixed decorations                                        -->
+    <!-- ======================================================= -->
+
+    <model name="planter_north_east">
+
+      <static>true</static>
+
+      <pose>3.25 2.20 0 0 0 0</pose>
+
+      <link name="planter_link">
+
+        <collision name="collision">
+          <pose>0 0 0.325 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.25</radius>
+              <length>0.65</length>
+            </cylinder>
+          </geometry>
+        </collision>
+
+        <visual name="visual">
+          <pose>0 0 0.325 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.25</radius>
+              <length>0.65</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.18 0.36 0.18 1</ambient>
+            <diffuse>0.22 0.48 0.22 1</diffuse>
+          </material>
+        </visual>
+
+      </link>
+
+    </model>
+
+
+    <model name="planter_south_east">
+
+      <static>true</static>
+
+      <pose>3.25 -2.20 0 0 0 0</pose>
+
+      <link name="planter_link">
+
+        <collision name="collision">
+          <pose>0 0 0.325 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.25</radius>
+              <length>0.65</length>
+            </cylinder>
+          </geometry>
+        </collision>
+
+        <visual name="visual">
+          <pose>0 0 0.325 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.25</radius>
+              <length>0.65</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.18 0.36 0.18 1</ambient>
+            <diffuse>0.22 0.48 0.22 1</diffuse>
+          </material>
+        </visual>
+
+      </link>
+
+    </model>
+
+  </world>
+
+</sdf>

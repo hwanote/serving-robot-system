@@ -1,0 +1,31 @@
+# python -m app --config config/fleet.yaml      (command line flags override this file)
+mode: C                      # A one robot | B simple dispatch | C cooperative (zones + route check)
+adapter: ros                 # ros | fake
+robots:                      # one ROS_DOMAIN_ID per robot (TF frames are not prefixed)
+  - {name: robot_01, domain: 0}
+  - {name: robot_02, domain: 2}
+zones:                       # who serves which table first; the other robot helps after help_after_s
+  robot_01: [table_01, table_03]
+  robot_02: [table_02, table_04]
+priorities:                  # bigger is served first (default 0)
+  # table_04: 5
+stagger_s: 10
+help_after_s: 15
+idle_home_s: 10
+offline_after_s: 5
+offline_fail_s: 30
+ack_timeout_s: 10
+# automatic mapping (Start Mapping in the map setup screen). The mapping stack must already run.
+mapping_enabled: false       # true to allow Start Mapping
+# Origin shift applied when a new map is adopted (Save Map). It only matters in SIMULATION:
+#   the SLAM map starts at the pose where the robot was put (map 0,0), and Gazebo puts the robot at
+#   the standby pose (-3.2, -2.4) of the world, so the map is moved by that much to line up with the
+#   world. Without it a standby point drawn on the new map spawns the robot elsewhere in Gazebo
+#   (RViz shows it at the standby, Gazebo near the middle of the cafe).
+# A REAL store has no world to line up with: set [0.0, 0.0] there.
+# If the standby of the robot in config/common/robot_start.yaml is not (-3.2, -2.4), use that point.
+mapping_shift_origin: [-3.2, -2.4]
+# mapping_work_dir:          # default <data_dir>/mapping
+# mapping_runner:            # default ros_ws/src/serving_robot_mapping/tools/run_lidar_mapping_session.py
+# mapping_ros_python: /usr/bin/python3
+# mapping_require_ros_env: true
