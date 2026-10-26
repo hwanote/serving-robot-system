@@ -56,6 +56,10 @@
   -->
   <xacro:property name="wheel_separation" value="0.35"/>
 
+  <!-- Measured in simulation: in-place rotation is about 10 percent larger than
+       the 0.35 m geometric track predicts. Used only by DiffDrive (cmd and odom). -->
+  <xacro:property name="wheel_separation_effective" value="0.316"/>
+
   <xacro:property
     name="wheel_z"
     value="${wheel_radius - base_link_z}"/>
@@ -70,7 +74,7 @@
 
   <xacro:property
     name="caster_z"
-    value="${caster_radius - base_link_z}"/>
+    value="${caster_radius - base_link_z + 0.003}"/>
 
 
   <!-- ========================================================= -->
@@ -569,7 +573,7 @@
         <left_joint>left_wheel_joint</left_joint>
         <right_joint>right_wheel_joint</right_joint>
 
-        <wheel_separation>${wheel_separation}</wheel_separation>
+        <wheel_separation>${wheel_separation_effective}</wheel_separation>
         <wheel_radius>${wheel_radius}</wheel_radius>
 
         <odom_publish_frequency>50</odom_publish_frequency>

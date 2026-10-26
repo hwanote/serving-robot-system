@@ -2,6 +2,83 @@
 
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+  <!-- ======================================================= -->
+  <!-- RGB-D camera, one per direction: three 120 deg cameras    -->
+  <!-- (front, rear-left +120 deg, rear-right -120 deg) see all   -->
+  <!-- around the robot (step 4, see docs/DECISIONS.md C5).       -->
+  <!-- The camera looks along +x of its link (Gazebo convention). -->
+  <!-- Mounted at 1.0 m above the floor (base_link is 0.12 m up,   -->
+  <!-- so z = 0.88): a shelf at about 0.75 m plus 0.30 m of a      -->
+  <!-- cover that the real robot design will hide.                 -->
+  <!-- Wide view: horizontal 2.094 rad (120 deg, three cameras    -->
+  <!-- cover 360 deg), vertical about 105 deg (4:3). The depth     -->
+  <!-- image is the distance ALONG the optical axis: at the image  -->
+  <!-- edge (60 deg off axis) that is half the real distance, so   -->
+  <!-- the detector converts it with the pixel direction.          -->
+  <!-- Tilted up by 8 deg   -->
+  <!-- (pitch -0.14) so that a person 0.4 - 2 m away is seen from  -->
+  <!-- the chest to the head: the upper body is what YOLO needs.   -->
+  <!-- Depth is measured along the tilted axis: the forward        -->
+  <!-- distance is up to about 5 % shorter (upper rows); the       -->
+  <!-- hysteresis margin of the person safety state covers that.   -->
+  <!-- Check the real error on the VM before relying on it.        -->
+  <!-- No mast is drawn: the GPU LiDAR sees visuals and would take -->
+  <!-- a mast crossing its plane (0.30 m) for an obstacle.         -->
+  <!-- Visual only (no collision) so the bumper never sees it; it   -->
+  <!-- floats far above the LiDAR plane.                            -->
+  <!-- ======================================================= -->
+  <xacro:macro
+    name="serving_robot_camera"
+    params="robot_name cam_name x y z yaw pitch hfov:=2.094 rate:=10">
+
+    <link name="${cam_name}_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.03 0.08 0.03"/>
+        </geometry>
+        <material name="${cam_name}_dark">
+          <color rgba="0.05 0.05 0.12 1.0"/>
+        </material>
+      </visual>
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="0.00001" ixy="0.0" ixz="0.0"
+                 iyy="0.00001" iyz="0.0" izz="0.00001"/>
+      </inertial>
+    </link>
+
+    <joint name="${cam_name}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${cam_name}_link"/>
+      <origin xyz="${x} ${y} ${z}" rpy="0 ${pitch} ${yaw}"/>
+    </joint>
+
+    <gazebo reference="${cam_name}_link">
+      <sensor name="${cam_name}" type="rgbd_camera">
+        <always_on>true</always_on>
+        <update_rate>${rate}</update_rate>
+        <topic>/model/${robot_name}/${cam_name}</topic>
+        <gz_frame_id>${cam_name}_link</gz_frame_id>
+        <camera>
+          <horizontal_fov>${hfov}</horizontal_fov>
+          <image>
+            <width>320</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>8.0</far>
+          </clip>
+        </camera>
+      </sensor>
+    </gazebo>
+
+  </xacro:macro>
+
+
   <xacro:macro
     name="serving_robot_sensors"
     params="robot_name">
@@ -109,6 +186,54 @@
       </sensor>
 
     </gazebo>
+
+
+    <!-- ======================================================= -->
+    <!-- Contact sensor (bumper): the body touched something     -->
+    <!--                                                         -->
+    <!-- base_footprint -> base_link is a fixed joint, so Gazebo -->
+    <!-- merges base_link into the link "base_footprint" and     -->
+    <!-- renames the collisions (checked on the VM with          -->
+    <!--   gz sdf -p robot.urdf | grep "collision name"          -->
+    <!-- ). The _1/_2 numbers follow the order in base.xacro:    -->
+    <!-- if that order or the collision names change, update     -->
+    <!-- the three names below.                                  -->
+    <!-- Only body collisions are listed (not wheels/casters,    -->
+    <!-- which always touch the floor).                          -->
+    <!-- ======================================================= -->
+
+    <gazebo reference="base_link">
+
+      <sensor
+        name="bumper_contact"
+        type="contact">
+
+        <always_on>true</always_on>
+        <update_rate>20</update_rate>
+
+        <contact>
+          <collision>base_footprint_fixed_joint_lump__central_chassis_collision_collision</collision>
+          <collision>base_footprint_fixed_joint_lump__front_bumper_collision_collision_1</collision>
+          <collision>base_footprint_fixed_joint_lump__rear_bumper_collision_collision_2</collision>
+        </contact>
+
+      </sensor>
+
+    </gazebo>
+
+    <!-- Three cameras, 120 deg apart. The front one keeps its place  -->
+    <!-- (x 0.15: the person distances are measured from it); the two -->
+    <!-- rear ones are 0.15 m from the centre, facing out. The rear    -->
+    <!-- ones run at 5 Hz to save rendering time on a GPU-less VM.     -->
+    <xacro:serving_robot_camera
+      robot_name="${robot_name}" cam_name="camera_front"
+      x="0.15" y="0" z="0.88" yaw="0" pitch="-0.14"/>
+    <xacro:serving_robot_camera
+      robot_name="${robot_name}" cam_name="camera_rear_left"
+      x="-0.075" y="0.13" z="0.88" yaw="2.0944" pitch="-0.14" rate="5"/>
+    <xacro:serving_robot_camera
+      robot_name="${robot_name}" cam_name="camera_rear_right"
+      x="-0.075" y="-0.13" z="0.88" yaw="-2.0944" pitch="-0.14" rate="5"/>
 
   </xacro:macro>
 

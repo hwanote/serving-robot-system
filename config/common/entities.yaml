@@ -1,0 +1,62 @@
+# Physical things in the store: robots, tables, fixtures.
+# Single source of truth for IDs (do not hard-code table/robot IDs elsewhere).
+# Units: SI (m, rad). Frame: map (== Gazebo world origin for the demo store).
+#
+# status: provisional  -> values for the synthetic demo store. They are
+#   replaced when the mapping team delivers the real map. After that run
+#     python3 scripts/validate_site_config.py
+#   to see what no longer fits.
+# authoring: manual | generated  (generated = produced by the route generator,
+#   always reviewed by a person before status becomes `reviewed`).
+schema_version: 1
+status: provisional
+authoring: manual
+
+robots:
+  robot_01: {}
+
+# Tables. `chairs` are movable furniture: they are NOT in the static map but the
+# robot must not plan through them, so the validator treats them as obstacles.
+# `top_size_m` is the table top (above the LiDAR plane, not in the map).
+tables:
+  table_01:
+    world_model: table_set_01
+    center: {x: -1.60, y: 0.65}
+    top_size_m: {x: 0.80, y: 0.80}
+    chairs: &chairs_ew
+      - {dx: -0.65, dy: 0.0, size_m: 0.45}
+      - {dx: 0.65, dy: 0.0, size_m: 0.45}
+  table_02:
+    world_model: table_set_02
+    center: {x: 1.55, y: 0.65}
+    top_size_m: {x: 0.80, y: 0.80}
+    chairs: *chairs_ew
+  table_03:
+    world_model: table_set_03
+    center: {x: -1.60, y: -1.45}
+    top_size_m: {x: 0.80, y: 0.80}
+    chairs: *chairs_ew
+  table_04:
+    world_model: table_set_04
+    center: {x: 1.55, y: -1.45}
+    top_size_m: {x: 0.80, y: 0.80}
+    chairs: *chairs_ew
+
+# Fixed objects that are already in the static map (kept here so poses can
+# refer to them, e.g. the kitchen pose faces the counter).
+fixtures:
+  counter:
+    world_model: cafe_counter
+    kind: box
+    center: {x: -2.30, y: 2.40}
+    size_m: {x: 2.50, y: 0.70}
+  planter_north_east:
+    world_model: planter_north_east
+    kind: cylinder
+    center: {x: 3.25, y: 2.20}
+    radius_m: 0.25
+  planter_south_east:
+    world_model: planter_south_east
+    kind: cylinder
+    center: {x: 3.25, y: -2.20}
+    radius_m: 0.25

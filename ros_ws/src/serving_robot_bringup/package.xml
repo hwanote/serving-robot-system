@@ -17,6 +17,14 @@
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <!-- wait_for_ready.py -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
 
   <exec_depend>xacro</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
@@ -26,6 +34,8 @@
   <exec_depend>serving_robot_description</exec_depend>
   <exec_depend>serving_robot_gazebo</exec_depend>
   <exec_depend>serving_robot_navigation</exec_depend>
+  <exec_depend>serving_robot_mapping</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
   <exec_depend>serving_robot_perception</exec_depend>
 
   <export>

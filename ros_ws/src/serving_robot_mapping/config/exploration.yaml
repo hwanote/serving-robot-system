@@ -1,0 +1,40 @@
+exploration_manager:
+  ros__parameters:
+    use_sim_time: true
+
+    robot_id: robot_01
+
+    frames:
+      map: map
+      base: base_footprint
+
+    topics:
+      map: /map
+      odom: /robot_01/odom
+      cmd_vel: /mapping/test_only_cmd_vel_unconnected
+      scan: /robot_01/scan
+
+    lidar:
+      max_range_m: 12.0
+
+    motion:
+      max_linear_mps: 0.15
+
+      rotation:
+        kp: 0.80
+        max_angular_speed_rps: 0.30
+        min_angular_speed_rps: 0.05
+        angle_tolerance_rad: 0.02
+        stop_angular_velocity_rps: 0.02
+        settle_cycles: 5
+
+    initial_scan:
+      target_angle_rad: 6.283185307
+
+    frontier:
+      min_size_m: 0.40
+      goal_clearance_m: 0.35
+
+    completion:
+      no_frontier_cycles: 5
+      stable_time_s: 10.0

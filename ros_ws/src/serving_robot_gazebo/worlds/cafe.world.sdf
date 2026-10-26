@@ -33,6 +33,12 @@
       name="gz::sim::systems::SceneBroadcaster">
     </plugin>
 
+    <!-- Needed by the contact sensor (bumper) of the robot -->
+    <plugin
+      filename="gz-sim-contact-system"
+      name="gz::sim::systems::Contact">
+    </plugin>
+
     <!-- Required later for GPU LiDAR / RGB-D sensors -->
     <plugin
       filename="gz-sim-sensors-system"

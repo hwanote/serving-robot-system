@@ -1,0 +1,58 @@
+# Names of the topics and services that the autonomy part shares with other
+# parts (React panel, fleet, teammates' nodes). Single source of truth: nodes
+# and launch files read their names from here, they do not type them.
+# Contract (meaning of every field): docs/INTERFACES.md
+#
+# `{robot}` is replaced by the robot name (default_robot, or the `robot_name`
+# launch argument / node parameter). Names without `{robot}` are shared.
+#
+# Files that Gazebo / Nav2 read as they are (bridge.yaml, nav2.yaml, amcl.yaml,
+# slam.yaml, collision_monitor.yaml) cannot use `{robot}`: they are checked
+# against this file by  python3 scripts/validate_interfaces.py
+schema_version: 1
+
+default_robot: robot_01
+
+topics:
+  # --- sensors (watch) -------------------------------------------------------
+  scan: /{robot}/scan
+  scan_dynamic: /{robot}/scan_dynamic
+  camera_image: /{robot}/camera_front/image
+  camera_depth: /{robot}/camera_front/depth
+  camera_info: /{robot}/camera_front/camera_info
+  camera_rear_left_image: /{robot}/camera_rear_left/image
+  camera_rear_left_depth: /{robot}/camera_rear_left/depth
+  camera_rear_left_info: /{robot}/camera_rear_left/camera_info
+  camera_rear_right_image: /{robot}/camera_rear_right/image
+  camera_rear_right_depth: /{robot}/camera_rear_right/depth
+  camera_rear_right_info: /{robot}/camera_rear_right/camera_info
+  contact: /{robot}/contact
+  odom: /{robot}/odom
+  person_observations: /{robot}/person_observations   # camera node -> judge
+  # --- judgement -------------------------------------------------------------
+  person_detection: /{robot}/person_detection
+  person_limit: /{robot}/person_limit
+  obstacle_hold: /{robot}/obstacle_hold
+  collision_latched: /{robot}/collision_latched
+  health: /{robot}/health            # robot summary (team enums)
+  # --- drive -----------------------------------------------------------------
+  cmd_vel: /{robot}/cmd_vel
+  # --- control ---------------------------------------------------------------
+  mission_cmd: /{robot}/mission_cmd
+  mission_status: /{robot}/mission_status
+  alarm: /{robot}/alarm
+
+services:
+  request_detour: /{robot}/request_detour
+  cancel_mission: /{robot}/cancel_mission
+  confirm_load: /{robot}/confirm_load
+  confirm_handover: /{robot}/confirm_handover
+  clear_collision: /{robot}/clear_collision
+
+# Nav2 side (no robot prefix: the Nav2 nodes run without a namespace)
+nav2:
+  nav_action: navigate_to_pose
+  follow_action: follow_path          # controller_server: the straight rails
+  amcl_pose: amcl_pose                # AMCL estimate with covariance (health)
+  initialpose: initialpose            # give AMCL a pose (reset command)
+  collision_monitor_state: collision_monitor_state
