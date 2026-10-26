@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package format="3">
+  <name>cafe_autonomy</name><version>1.0.0</version>
+  <description>Cafe autonomy dual robot integration</description>
+  <maintainer email="team@example.invalid">Cafe Autonomy Team</maintainer>
+  <license>Apache-2.0</license><buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend><exec_depend>ament_index_python</exec_depend><exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend><exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend><exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>action_msgs</exec_depend><exec_depend>tf2_ros</exec_depend><exec_depend>tf2_msgs</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend><exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend><exec_depend>nav2_collision_monitor</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend><exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend><exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_planner</exec_depend><exec_depend>nav2_bt_navigator</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend><exec_depend>nav2_velocity_smoother</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend><exec_depend>python3-yaml</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+<exec_depend>lifecycle_msgs</exec_depend><exec_depend>launch</exec_depend><exec_depend>launch_ros</exec_depend><exec_depend>xacro</exec_depend><exec_depend>slam_toolbox</exec_depend><exec_depend>serving_robot_description</exec_depend><exec_depend>serving_robot_gazebo</exec_depend><exec_depend>serving_robot_navigation</exec_depend><exec_depend>python3-numpy</exec_depend><exec_depend>python3-opencv</exec_depend><exec_depend>ros_gz_interfaces</exec_depend><exec_depend>sensor_msgs_py</exec_depend><exec_depend>unique_identifier_msgs</exec_depend><exec_depend>nav2_smac_planner</exec_depend></package>
