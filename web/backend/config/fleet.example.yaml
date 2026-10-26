@@ -17,7 +17,14 @@ offline_fail_s: 30
 ack_timeout_s: 10
 # automatic mapping (Start Mapping in the map setup screen). The mapping stack must already run.
 mapping_enabled: false       # true to allow Start Mapping
-# mapping_shift_origin: [-3.2, -2.4]   # simulation only: Gazebo spawn pose. A real store: [0, 0] (default)
+# Origin shift applied when a new map is adopted (Save Map). It only matters in SIMULATION:
+#   the SLAM map starts at the pose where the robot was put (map 0,0), and Gazebo puts the robot at
+#   the standby pose (-3.2, -2.4) of the world, so the map is moved by that much to line up with the
+#   world. Without it a standby point drawn on the new map spawns the robot elsewhere in Gazebo
+#   (RViz shows it at the standby, Gazebo near the middle of the cafe).
+# A REAL store has no world to line up with: set [0.0, 0.0] there.
+# If the standby of the robot in config/common/robot_start.yaml is not (-3.2, -2.4), use that point.
+mapping_shift_origin: [-3.2, -2.4]
 # mapping_work_dir:          # default <data_dir>/mapping
 # mapping_runner:            # default ros_ws/src/serving_robot_mapping/tools/run_lidar_mapping_session.py
 # mapping_ros_python: /usr/bin/python3
