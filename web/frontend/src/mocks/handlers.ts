@@ -12,7 +12,7 @@ import mapPngDataUrl from './assets/demo_store_map.png?inline'
 import { commitMockDb, mockDb, nextTaskId, type FailureKey } from './db'
 import { buildRawMap, MOCK_STORE_ID } from './fixtures'
 import { liveMapHandlers } from './liveMapHandlers'
-import { cancelSimTask, enqueueTask, simHome, simReloadAll, simReloadMap, simReset, type RobotCommandProblem } from './simulator'
+import { cancelSimTask, enqueueTask, simHome, simMapImageChanged, simReloadAll, simReloadMap, simReset, type RobotCommandProblem } from './simulator'
 
 const api = (path: string) => `${API_BASE_URL}/api${path}`
 
@@ -44,12 +44,43 @@ function injectedFailure(key: FailureKey) {
   return mockDb.failures[key] ? error(503, `[Mock] ${key} 실패 시뮬레이션이 켜져 있습니다.`) : null
 }
 
+/** 시작한 뒤 흐른 시간(ms). 탐색이 스스로 끝날 시간이 지났으면 초안을 준비한다 (실제 백엔드와 같은 동작) */
+function elapsedMs(): number {
+  return mockDb.mappingStartedAt ? Date.now() - Date.parse(mockDb.mappingStartedAt) : 0
+}
+
+function settleMapping() {
+  if (mockDb.mappingPhase === 'mapping' && mockDb.mappingAutoEndMs > 0 && elapsedMs() >= mockDb.mappingAutoEndMs) {
+    mockDb.mappingPhase = 'stopped'
+    mockDb.mappingDraft = true
+  }
+}
+
 function mappingStatus(): MappingStatus {
+  settleMapping()
+  const ms = elapsedMs()
+  const mapping = mockDb.mappingPhase === 'mapping'
+  const arrived = Math.floor(ms / 1500)
   return {
     store_id: MOCK_STORE_ID,
     phase: mockDb.mappingPhase,
     started_at: mockDb.mappingStartedAt,
     last_saved_revision: mockDb.rawMap?.map_revision ?? null,
+    draft_ready: mockDb.mappingDraft,
+    stage: mapping ? (arrived > 0 ? 'exploring' : 'starting') : mockDb.mappingDraft ? 'ready' : 'idle',
+    progress: {
+      percent: mockDb.mappingDraft ? 100 : mapping ? Math.min(99, Math.floor(95 * (1 - Math.exp(-arrived / 12)))) : 0,
+      estimated: !mockDb.mappingDraft,
+      elapsed_s: mockDb.mappingStartedAt ? Math.floor(ms / 1000) : null,
+      goals_sent: mapping || mockDb.mappingDraft ? arrived + 1 : 0,
+      goals_arrived: mapping || mockDb.mappingDraft ? arrived : 0,
+      goals_failed: 0,
+    },
+    message: mockDb.mappingDraft ? '자동 탐색이 끝났어요. 지도를 검토해 주세요.' : null,
+    error: null,
+    stop_requested: false,
+    enabled: true,
+    saved: false,
   }
 }
 
@@ -62,7 +93,7 @@ async function readJson(request: Request): Promise<Record<string, unknown> | nul
   }
 }
 
-function mappingHandler(command: 'start' | 'stop' | 'save'): HttpResponseResolver {
+function mappingHandler(command: 'start' | 'stop' | 'discard'): HttpResponseResolver {
   return async ({ request }) => {
     await respondDelay()
     const failure = injectedFailure('mapping')
@@ -70,26 +101,57 @@ function mappingHandler(command: 'start' | 'stop' | 'save'): HttpResponseResolve
     const body = (await readJson(request)) as Partial<MappingCommandBody> | null
     if (!body || typeof body.store_id !== 'string') return error(400, 'store_id 가 필요합니다.')
     if (body.store_id !== MOCK_STORE_ID) return error(404, `알 수 없는 매장입니다: ${body.store_id}`)
+    settleMapping()
 
     if (command === 'start') {
-      if (mockDb.mappingPhase === 'mapping') return error(409, '이미 매핑이 진행 중입니다.')
+      if (mockDb.mappingPhase === 'mapping') return refuse(409, 'ALREADY_MAPPING', '이미 매핑 중이에요.')
+      if (mockDb.mappingDraft) return refuse(409, 'DRAFT_PENDING', '아직 반영하지 않은 임시 지도가 있어요. 보정해서 저장하거나 버린 뒤에 다시 시작해 주세요.')
       mockDb.mappingPhase = 'mapping'
       mockDb.mappingStartedAt = new Date().toISOString()
     } else if (command === 'stop') {
-      if (mockDb.mappingPhase !== 'mapping') return error(409, '진행 중인 매핑이 없습니다.')
+      if (mockDb.mappingPhase !== 'mapping') return refuse(409, 'NOT_MAPPING', '중지할 매핑이 없어요.')
       mockDb.mappingPhase = 'stopped'
+      mockDb.mappingDraft = true
     } else {
-      if (mockDb.mappingPhase === 'idle') return error(409, '저장할 매핑 결과가 없습니다. 먼저 매핑을 시작하세요.')
-      const revision = (mockDb.rawMap?.map_revision ?? 0) + 1
-      mockDb.rawMap = buildRawMap(MOCK_STORE_ID, revision)
-      if (mockDb.mappingPhase === 'stopped') {
-        mockDb.mappingPhase = 'idle'
-        mockDb.mappingStartedAt = null
-      }
+      if (mockDb.mappingPhase === 'mapping') return refuse(409, 'ALREADY_MAPPING', '매핑 중에는 버릴 수 없어요. 먼저 중지해 주세요.')
+      mockDb.mappingPhase = 'idle'
+      mockDb.mappingDraft = false
+      mockDb.mappingStartedAt = null
     }
     commitMockDb()
     return HttpResponse.json(mappingStatus())
   }
+}
+
+/** 새 지도를 매장 지도로 반영: revision +1, 편집기는 새 지도에서 빈 상태로 시작 */
+function adoptMockMap() {
+  const revision = (mockDb.rawMap?.map_revision ?? 0) + 1
+  mockDb.rawMap = buildRawMap(MOCK_STORE_ID, revision)
+  mockDb.semantics = { store_id: MOCK_STORE_ID, map_revision: revision, entities: [], waypoints: [], zones: [] }
+  mockDb.mappingPhase = 'idle'
+  mockDb.mappingDraft = false
+  mockDb.mappingStartedAt = null
+  commitMockDb()
+  simMapImageChanged()
+  return revision
+}
+
+const MOCK_SOURCE_HASH = 'mock-draft-hash'
+
+function adoptResult(review: boolean) {
+  if (mockDb.adoptBlocked) {
+    return HttpResponse.json({
+      ...mappingStatus(), saved: true, adopted: false,
+      ...(review ? { review_result: { saved: true } } : {}),
+      adopt_error: { code: 'ORDERS_ACTIVE', message: '주문이 진행 중이거나 대기 중이라 지도를 바꿀 수 없어요. 주문이 끝난 뒤에 다시 시도해 주세요.' },
+    })
+  }
+  const revision = adoptMockMap()
+  return HttpResponse.json({
+    ...mappingStatus(), adopted: true, adopt_error: null, needs_robot_restart: true, map_revision: revision,
+    ...(review ? { review_result: { saved: true } } : {}),
+    message: '새 지도를 적용했어요. 로봇을 재시작해 주세요. (새로운 지도가 적용되었습니다.)',
+  })
 }
 
 function pngBytes(): Uint8Array<ArrayBuffer> {
@@ -106,7 +168,44 @@ export const httpHandlers = [
   ...liveMapHandlers,
   http.post(api('/mapping/start'), mappingHandler('start')),
   http.post(api('/mapping/stop'), mappingHandler('stop')),
-  http.post(api('/mapping/save'), mappingHandler('save')),
+  http.post(api('/mapping/discard'), mappingHandler('discard')),
+
+  http.post(api('/mapping/save'), async ({ request }) => {
+    await respondDelay()
+    const failure = injectedFailure('mapping')
+    if (failure) return failure
+    settleMapping()
+    if (!mockDb.mappingDraft) return refuse(409, 'NO_DRAFT', '보정할 수 있는 임시 지도가 아직 없어요.')
+    const body = await readJson(request)
+    if (!body || body.confirmed !== true) return refuse(422, 'REVIEW_REJECTED', '지도 수정 내용의 최종 확인이 필요합니다.')
+    if (body.source_hash !== MOCK_SOURCE_HASH) return refuse(409, 'REVIEW_REJECTED', '지도가 변경되었습니다. 최신 지도를 다시 확인해 주세요.')
+    return adoptResult(true)
+  }),
+
+  http.post(api('/mapping/adopt'), async () => {
+    await respondDelay()
+    if (mockDb.mappingDraft && mockDb.mappingPhase !== 'mapping') return adoptResult(false)
+    return refuse(409, 'NOT_SAVED', '저장한 보정 지도가 없어요. 먼저 지도를 보정해서 저장해 주세요.')
+  }),
+
+  http.get(api('/stores/:storeId/map-review'), async ({ params }) => {
+    await respondDelay()
+    settleMapping()
+    if (params.storeId !== MOCK_STORE_ID) return refuse(404, 'NO_MAP', '매장을 찾지 못했어요.')
+    if (!mockDb.mappingDraft) return refuse(409, 'NO_DRAFT', '보정할 수 있는 임시 지도가 아직 없어요.')
+    const geo = buildRawMap(MOCK_STORE_ID, 1)
+    return HttpResponse.json({
+      width: geo.width, height: geo.height, resolution: geo.resolution, origin: geo.origin,
+      source_hash: MOCK_SOURCE_HASH,
+      image_url: `/api/stores/${MOCK_STORE_ID}/map-review.png`,
+      suggestions: [{ id: 'wall-gap-001', x1: 20, y1: 20, x2: 24, y2: 20, gap_m: 0.15 }],
+    })
+  }),
+
+  http.get(api('/stores/:storeId/map-review.png'), async ({ params }) => {
+    if (params.storeId !== MOCK_STORE_ID || !mockDb.mappingDraft) return refuse(409, 'NO_DRAFT', '보정할 수 있는 임시 지도가 아직 없어요.')
+    return HttpResponse.arrayBuffer(pngBytes().buffer, { headers: { 'Content-Type': 'image/png' } })
+  }),
 
   http.get(api('/mapping/status'), async () => {
     await respondDelay()

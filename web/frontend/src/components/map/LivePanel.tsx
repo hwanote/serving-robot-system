@@ -85,10 +85,10 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
     })
 
   const onPromote = () => {
-    if (!window.confirm('이 지도를 로봇이 읽는 지도로 반영할까요?\n\n· 지금 지도는 날짜·시간이 붙은 백업으로 남아서 나중에 되돌릴 수 있어요.\n· 주문이 진행 중이면 반영되지 않아요.\n· 로봇은 로봇 관제 화면에서 "지도 다시 읽기"를 눌러야 새 지도로 움직여요.')) return
+    if (!window.confirm('이 지도를 로봇이 읽는 지도로 반영할까요?\n\n· 지금 지도는 날짜·시간이 붙은 백업으로 남아서 나중에 되돌릴 수 있어요.\n· 주문이 진행 중이면 반영되지 않아요.\n· 새 노드·통로·테이블 위치는 로봇 관제 화면에서 "지도 다시 읽기"를 눌러야 로봇이 써요. (지도 그림은 이 반영으로 바뀌지 않아요.)')) return
     void run('promote', async () => {
       const r = await promoteMap(storeId)
-      setRestartNote(`반영했어요. 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 로봇이 새 지도로 움직여요. (이전 지도 백업: ${formatBackupTime(r.backup)})`)
+      setRestartNote(`반영했어요. 새 노드·통로·테이블 위치는 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 로봇이 써요. (이전 지도 백업: ${formatBackupTime(r.backup)})`)
       return '로봇 지도에 반영했어요.'
     })
   }
@@ -99,7 +99,7 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
       '',
       '· 지금 지도도 백업으로 남아서 다시 되돌릴 수 있어요.',
       '· 주문이 진행 중이면 되돌려지지 않아요.',
-      "· 로봇은 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 해요.",
+      "· 되돌린 노드·통로는 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 로봇이 써요.",
     ]
     if (b.has_semantics === false) lines.push('· 이 백업에는 편집 화면 저장본이 없어서, 편집 화면은 지도 파일에서 다시 만들어요. 직접 그린 구역은 빠져요.')
     else lines.push('· 편집 화면(Raw Map · Semantic 편집)의 저장본도 이 백업 때 모습으로 바뀌어요.')
@@ -108,7 +108,7 @@ export function LivePanel({ storeId, dirty, savedKey, onRestored }: Props) {
     void run(`restore:${b.id}`, async () => {
       const r = await restoreBackup(storeId, b.id)
       if (r.semantics_restored && r.semantics) onRestored?.(r.semantics)
-      const base = `${formatBackupTime(b)} 백업으로 되돌렸어요. 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 로봇이 새 지도로 움직여요.`
+      const base = `${formatBackupTime(b)} 백업으로 되돌렸어요. 로봇 관제 화면에서 '지도 다시 읽기'를 눌러야 로봇이 되돌린 노드·통로를 써요.`
       const extra = r.semantics_restored
         ? ` 편집 화면도 그때 모습으로 바뀌었어요.${r.semantics_note ? ` (${r.semantics_note})` : ''} 로봇에 다시 반영하려면 "노드 자동 생성"부터 해 주세요.`
         : r.semantics_note

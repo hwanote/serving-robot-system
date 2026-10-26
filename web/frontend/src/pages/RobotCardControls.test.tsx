@@ -113,6 +113,24 @@ describe('로봇 카드 버튼 (리셋 / 대기 위치로 / 지도 다시 읽기
     expect(screen.getByTestId('map-badge-robot_01')).toHaveTextContent('확인 불가')
   })
 
+  it('지도 그림이 바뀐 로봇에는 재시작 안내가 뜨고, 다시 읽기로는 안 된다고 알려 준다', async () => {
+    const { card, socket } = await openPage({ map_image_current: true })
+    expect(screen.queryByTestId('restart-notice-robot_01')).not.toBeInTheDocument()
+
+    act(() => socket().message(event({ map_image_current: false, map_current: false, controls: controls({ reload_map: true }) })))
+    const notice = screen.getByTestId('restart-notice-robot_01')
+    expect(notice).toHaveTextContent('로봇을 재시작해 주세요. (새로운 지도가 적용되었습니다.)')
+    expect(notice).toHaveTextContent('영업이 끝났거나 주문이 없을 때')
+    expect(screen.getByTestId('map-badge-robot_01')).toHaveTextContent('로봇 재시작 필요')
+    expect(within(card).getByRole('button', { name: '지도 다시 읽기' })).toBeDisabled()
+
+    act(() => socket().message(event({ map_image_current: true })))
+    expect(screen.queryByTestId('restart-notice-robot_01')).not.toBeInTheDocument()
+
+    act(() => socket().message(event({ map_image_current: null })))
+    expect(screen.queryByTestId('restart-notice-robot_01')).not.toBeInTheDocument()
+  })
+
   it('"모든 로봇 지도 다시 읽기"는 결과를 로봇별로 요약한다', async () => {
     capture('/api/robots/reload-map', 200, { robots: { robot_01: 'sent', robot_02: 'busy' } })
     await openPage()

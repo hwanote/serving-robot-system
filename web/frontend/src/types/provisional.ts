@@ -35,13 +35,74 @@ export interface TaskStateEvent {
 /** 매핑 세션 상태 (Robot/Task 상태와 무관한 UI용 값, 소문자로 구분) */
 export type MappingPhase = 'idle' | 'mapping' | 'stopped'
 
+/** 자동 매핑 진행 단계 (백엔드 session.py). 옛 백엔드/mock 은 보내지 않을 수 있다. */
+export type MappingStage = 'idle' | 'starting' | 'exploring' | 'finishing' | 'converting' | 'ready' | 'failed'
+
+export interface MappingProgress {
+  /** 추정 진행률 (0~100). 줄어들지 않고, 초안이 준비되기 전에는 99 를 넘지 않는다 */
+  percent: number
+  /** true 면 "추정" 이라고 표기한다 */
+  estimated: boolean
+  elapsed_s: number | null
+  goals_sent: number
+  goals_arrived: number
+  goals_failed: number
+}
+
 /** GET /api/mapping/status 및 mapping 명령 응답 (임시) */
 export interface MappingStatus {
   store_id: string
   phase: MappingPhase
   started_at: string | null
-  /** 마지막으로 저장된 Raw Map revision. 없으면 null */
+  /** 현재 매장 지도의 revision. 없으면 null */
   last_saved_revision: number | null
+  /** 보정할 임시 지도(초안)가 준비됨 */
+  draft_ready?: boolean
+  stage?: MappingStage
+  progress?: MappingProgress
+  message?: string | null
+  error?: string | null
+  stop_requested?: boolean
+  /** false 면 백엔드에서 자동 매핑이 꺼져 있다 (mapping_enabled) */
+  enabled?: boolean
+  /** 보정 저장은 됐지만 지도 반영(채택)이 남아 있다 */
+  saved?: boolean
+}
+
+/** POST /api/mapping/save · /api/mapping/adopt 응답 */
+export interface MapSaveResult extends MappingStatus {
+  review_result?: { saved: boolean; status?: string }
+  adopted: boolean
+  adopt_error?: { code: string; message: string } | null
+  needs_robot_restart?: boolean
+  backup?: { id: string; has_semantics: boolean } | null
+  map_revision?: number
+}
+
+/** GET /api/stores/{id}/map-review */
+export interface ReviewSuggestion {
+  id: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  gap_m: number
+}
+
+export interface MapReviewData {
+  width: number
+  height: number
+  resolution: number
+  origin: { x: number; y: number; yaw: number }
+  source_hash: string
+  image_url: string
+  suggestions: ReviewSuggestion[]
+}
+
+export interface MapSaveBody {
+  source_hash: string
+  confirmed: true
+  strokes: Array<{ x1: number; y1: number; x2: number; y2: number; value: number; points?: Array<{ x: number; y: number }> }>
 }
 
 // ---------- 지도 반영 (Backend semantics 적용 / config/common 반영 / 백업) ----------
@@ -106,6 +167,8 @@ export interface RobotExtras {
   localization?: string | null
   /** 로봇이 쓰는 지도가 지금 config/common 과 같은지. 모르면 null */
   map_current?: boolean | null
+  /** 로봇이 시작할 때 읽은 지도 그림이 지금 매장 지도와 같은지. false 면 로봇 재시작이 필요하다. 모르면 null */
+  map_image_current?: boolean | null
   controls?: RobotControls
 }
 

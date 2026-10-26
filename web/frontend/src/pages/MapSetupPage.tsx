@@ -9,12 +9,15 @@ import { GraphPreviewPanel } from '../components/map/GraphPreviewPanel'
 import { Inspector } from '../components/map/Inspector'
 import { LivePanel } from '../components/map/LivePanel'
 import { MappingPanel } from '../components/map/MappingPanel'
+import { MapReviewPanel } from '../components/map/MapReviewPanel'
 import { MapViewport, type MapOverlayContext, type MapPointerEvent } from '../components/map/MapViewport'
 import { ZONE_STYLE } from '../components/map/mapStyles'
 import { ObjectList } from '../components/map/ObjectList'
 import { SemanticLayer, ZoneDraftLayer } from '../components/map/SemanticLayer'
 import { resolveApiUrl } from '../config/env'
+import { getSemantics } from '../api/semanticApi'
 import { useGeneratedGraph } from '../hooks/useGeneratedGraph'
+import { useMappingControl } from '../hooks/useMappingControl'
 import { useSemanticEditor } from '../hooks/useSemanticEditor'
 import { useStoreData } from '../state/storeDataContext'
 import { useToast } from '../state/toastContext'
@@ -48,8 +51,21 @@ const isTypingTarget = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
 
 export function MapSetupPage() {
-  const { rawMap, reloadRawMap, semantics, reloadSemantics } = useStoreData()
+  const { storeId, rawMap, reloadRawMap, semantics, reloadSemantics } = useStoreData()
   const editor = useSemanticEditor()
+  const { replaceDraft } = editor
+  // 새 지도가 매장 지도로 반영되면: 지도와 편집 화면을 새 지도 기준으로 다시 읽는다
+  // (편집 중이던 내용은 버려진다. 이전 초안은 서버 백업에 남아 있다)
+  const handleAdopted = useCallback(async () => {
+    await reloadRawMap()
+    try {
+      const doc = await getSemantics(storeId)
+      if (doc) replaceDraft(doc)
+    } catch {
+      await reloadSemantics()
+    }
+  }, [storeId, reloadRawMap, reloadSemantics, replaceDraft])
+  const mapping = useMappingControl({ onAdopted: handleAdopted })
   const { state, dispatch, dirty } = editor
   const { notify } = useToast()
   const docKey = useMemo(() => serializeDoc(state.doc), [state.doc])
@@ -286,6 +302,8 @@ export function MapSetupPage() {
         </div>
       </div>
 
+      {mapping.draftReady && <MapReviewPanel mapping={mapping} />}
+
       <div className="setup-layout">
         <section className="card setup-map" aria-label="지도 편집">
           <div className="card-header">
@@ -309,7 +327,7 @@ export function MapSetupPage() {
         </section>
 
         <div className="setup-side">
-          <MappingPanel />
+          <MappingPanel mapping={mapping} />
 
           <section className="card" aria-labelledby="setup-title">
             <div className="card-header">

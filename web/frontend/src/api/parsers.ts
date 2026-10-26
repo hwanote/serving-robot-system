@@ -183,6 +183,8 @@ function parseRobotExtras(o: Obj): RobotExtras {
   if (typeof o.localization === 'string') out.localization = o.localization
   if (typeof o.map_current === 'boolean') out.map_current = o.map_current
   else if (o.map_current === null) out.map_current = null
+  if (typeof o.map_image_current === 'boolean') out.map_image_current = o.map_image_current
+  else if (o.map_image_current === null) out.map_image_current = null
   try {
     const controls = parseControls(o.controls)
     if (controls) out.controls = controls

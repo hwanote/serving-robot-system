@@ -21,6 +21,12 @@ export const FAILURE_LABELS: Record<FailureKey, string> = {
 export interface MockDbState {
   mappingPhase: MappingPhase
   mappingStartedAt: string | null
+  /** 보정할 임시 지도(초안)가 준비됨 */
+  mappingDraft: boolean
+  /** 탐색이 이 시간(ms) 뒤에 스스로 끝난다 (Stop 없이 초안 준비). 0 이하면 끝나지 않음 */
+  mappingAutoEndMs: number
+  /** true 면 지도 반영(채택)이 주문 때문에 보류된다 (테스트·개발용) */
+  adoptBlocked: boolean
   rawMap: RawMapInfo | null
   semantics: SemanticMap | null
   tasks: Task[]
@@ -42,6 +48,9 @@ function initialState(): MockDbState {
   return {
     mappingPhase: 'idle',
     mappingStartedAt: null,
+    mappingDraft: false,
+    mappingAutoEndMs: 8000,
+    adoptBlocked: false,
     rawMap: null,
     semantics: null,
     tasks: [],
@@ -95,6 +104,7 @@ export function resetMockDb() {
 export function seedMockDb() {
   const revision = (mockDb.rawMap?.map_revision ?? 0) + 1
   mockDb.mappingPhase = 'idle'
+  mockDb.mappingDraft = false
   mockDb.rawMap = buildRawMap(MOCK_STORE_ID, revision)
   mockDb.semantics = buildSeedSemantics(MOCK_STORE_ID, revision)
   commitMockDb()

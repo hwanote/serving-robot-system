@@ -34,6 +34,8 @@ interface SimRobot {
   lost: boolean
   /** 로봇이 읽어 둔 지도의 지문 (liveSha 와 같으면 최신) */
   mapSha: string
+  /** 매장 지도 그림이 바뀐 뒤 아직 재시작하지 않음 (로봇은 지도 그림을 시작할 때만 읽는다) */
+  imageStale: boolean
 }
 
 type Broadcast = (message: string) => void
@@ -66,6 +68,7 @@ function ensureRobots() {
       forcedError: false,
       lost: false,
       mapSha: liveSha(),
+      imageStale: false,
     })
   })
 }
@@ -89,6 +92,7 @@ function extras(r: SimRobot): RobotExtras {
   return {
     localization: r.lost ? 'LOST' : 'OK',
     map_current: current,
+    map_image_current: !r.imageStale,
     controls: {
       reset: true,
       reset_nodes: [standbyOf(r.id), 'kitchen'],
@@ -331,6 +335,14 @@ export function isRobotForcedError(robotId: string): boolean {
 }
 
 /** Dev 패널: 로봇 위치/상태 초기화 */
+/** 새 지도(그림)가 매장에 적용됨: 지금 떠 있는 로봇은 모두 재시작이 필요하다 */
+export function simMapImageChanged() {
+  robots.forEach((r) => {
+    r.imageStale = true
+    emitRobot(r)
+  })
+}
+
 export function resetSimulator() {
   robots.clear()
   ensureRobots()

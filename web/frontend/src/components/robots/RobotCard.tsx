@@ -3,7 +3,7 @@ import { robotDisplayName } from '../../hooks/useDestinations'
 import type { RobotView } from '../../state/fleetReducer'
 import { formatAgo } from '../../utils/labels'
 import { formatYawDeg } from '../../utils/coordinates'
-import { homeHint, mapBadge, nodeLabel, reloadHint } from '../../utils/robotControls'
+import { homeHint, mapBadge, needsRestart, nodeLabel, RESTART_CAUTION, RESTART_NOTICE, reloadHint } from '../../utils/robotControls'
 import { Icon } from '../common/Icon'
 import { RobotStateBadge } from '../common/StatusBadge'
 
@@ -57,10 +57,17 @@ function ControlRow({ robot, stale, actions }: { robot: RobotView; stale: boolea
   const off = stale || actions.pending !== null
   const badge = mapBadge(robot)
   const homeOff = off || !controls.home
-  const reloadOff = off || !controls.reload_map
+  const restart = needsRestart(robot)
+  const reloadOff = off || !controls.reload_map || restart
   return (
     <div className="robot-controls" style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
       <LocalizationNote value={robot.localization} />
+      {restart && (
+        <div role="status" className="alert alert-warn" data-testid={`restart-notice-${robot.robot_id}`} style={{ flexDirection: 'column', alignItems: 'flex-start', fontSize: 12 }}>
+          <strong>{RESTART_NOTICE}</strong>
+          <span>{RESTART_CAUTION}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <label className="muted" style={{ fontSize: 12 }} htmlFor={`reset-node-${robot.robot_id}`}>
           위치 리셋
@@ -90,7 +97,7 @@ function ControlRow({ robot, stale, actions }: { robot: RobotView; stale: boolea
         <span className="muted" style={{ fontSize: 12, color: badge.tone === 'ok' ? 'var(--ok)' : badge.tone === 'warn' ? 'var(--warn)' : undefined }} data-testid={`map-badge-${robot.robot_id}`}>
           {badge.text}
         </span>
-        <button type="button" className="btn btn-sm" disabled={reloadOff} onClick={actions.onReloadMap} title={reloadOff && !stale ? reloadHint(robot) : '로봇이 지도(config/common)를 다시 읽습니다'}>
+        <button type="button" className="btn btn-sm" disabled={reloadOff} onClick={actions.onReloadMap} title={reloadOff && !stale ? reloadHint(robot) : '로봇이 노드·통로·테이블 위치(config/common)를 다시 읽습니다. 지도 그림이 바뀐 경우에는 재시작이 필요해요'}>
           {actions.pending === 'reload' ? <span className="spinner spinner-sm" /> : null} 지도 다시 읽기
         </button>
       </div>

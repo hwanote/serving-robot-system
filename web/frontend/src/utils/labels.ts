@@ -1,6 +1,6 @@
 import type { SocketStatus } from '../api/stateSocket'
 import type { EntityType, RobotState, TaskStatus, ZoneType } from '../types/contracts'
-import type { MappingPhase } from '../types/provisional'
+import type { MappingPhase, MappingStage } from '../types/provisional'
 
 export type Tone = 'gray' | 'blue' | 'teal' | 'indigo' | 'amber' | 'slate' | 'red' | 'green'
 
@@ -35,6 +35,19 @@ export const MAPPING_PHASE_META: Record<MappingPhase, { label: string; tone: Ton
   mapping: { label: '매핑 진행 중', tone: 'blue' },
   stopped: { label: '중지됨 (미저장)', tone: 'amber' },
 }
+
+export const MAPPING_STAGE_LABEL: Record<MappingStage, string> = {
+  idle: '대기',
+  starting: '시작하는 중',
+  exploring: '탐색 중',
+  finishing: '마무리하는 중',
+  converting: '지도 초안 만드는 중',
+  ready: '지도 초안 준비됨',
+  failed: '지도 초안을 만들지 못함',
+}
+
+/** 단계 막대에 보여 주는 순서 (failed 는 따로 표시) */
+export const MAPPING_STAGE_ORDER: MappingStage[] = ['starting', 'exploring', 'finishing', 'converting', 'ready']
 
 export const ENTITY_TYPE_LABEL: Record<EntityType, string> = {
   table: '테이블',
