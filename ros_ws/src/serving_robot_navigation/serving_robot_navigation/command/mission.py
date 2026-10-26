@@ -127,6 +127,7 @@ class MissionCore:
         self.site = site
         self.p = params or MissionParams()
         self.blocked = {}            # edge id -> time until it is avoided
+        self.map_image = ''          # fingerprint of the map picture Nav2 loaded ('' = unknown)
         self.loc_state = None        # last localization state (None: unknown)
         self.loc_back_since = None   # since when it has been out of LOST (OK / DEGRADED)
         self._idle()
@@ -183,6 +184,7 @@ class MissionCore:
             'localization': self.loc_state or '',
             'loc_hold': self.loc_hold,
             'config_revision': getattr(self.site, 'revision', ''),
+            'map_image': self.map_image,
             'delivery_s': round(self.delivery_s, 1),
             'returning': self.returning,
             'table': self.table,

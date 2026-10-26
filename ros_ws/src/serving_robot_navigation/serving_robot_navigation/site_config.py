@@ -134,6 +134,28 @@ def config_revision(config_dir=None):
     return _revision(config_dir or default_config_dir())
 
 
+def map_image_fingerprint(map_yaml):
+    """Short hash of a map.yaml and the image it names (line endings of the yaml ignored): which
+    map picture a robot loaded. The robot reports it in mission_status.map_image and the backend
+    compares it with maps/stores/<store>/ (the Nav2 map_server reads that file only at launch, so
+    a robot that started before the map changed shows a different value). '' when unreadable."""
+    try:
+        with open(map_yaml, 'rb') as f:
+            raw = f.read().replace(b'\r\n', b'\n')
+        meta = yaml.safe_load(raw) or {}
+        image = meta.get('image', 'map.pgm')
+        if not os.path.isabs(image):
+            image = os.path.join(os.path.dirname(os.path.abspath(map_yaml)), image)
+        with open(image, 'rb') as f:
+            pixels = f.read()
+    except (OSError, ValueError, AttributeError, yaml.YAMLError):
+        return ''
+    h = hashlib.sha256()
+    h.update(raw)
+    h.update(pixels)
+    return h.hexdigest()[:12]
+
+
 class Site:
     def __init__(self, entities, waypoints, zones, config_dir, revision):
         self.entities = entities

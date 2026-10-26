@@ -6,6 +6,8 @@ Started by navigation.launch.py; can also run alone (Nav2 must be running).
 go_to.py and serve.py are command line tools, not launched.
 Add a new command-section node in MODULES below (one Node).
 """
+import os
+
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
@@ -26,6 +28,9 @@ def _modules(context, *args, **kwargs):
     rn = {'robot_name': robot} if robot else {}   # nodes read their names
     person_limit = (
         LaunchConfiguration('person_limit').perform(context).lower() == 'true')
+    # the map picture Nav2's map_server loads (same file as localization.launch.py)
+    store = LaunchConfiguration('store').perform(context)
+    map_yaml = {'map_yaml': os.path.join(share, 'maps', 'stores', store, 'map.yaml')}
 
     # test shortcuts (empty = use runtime_limits.yaml)
     test_overrides = {}
@@ -45,7 +50,7 @@ def _modules(context, *args, **kwargs):
             name='route_executor',
             output='screen',
             parameters=[sim, rn, executor_params(load_limits(share), person_limit),
-                        test_overrides],
+                        test_overrides, map_yaml],
         ),
     ]
     # ---------------------------------------------------------------------------
@@ -59,6 +64,8 @@ def generate_launch_description():
         DeclareLaunchArgument('robot_name', default_value='',
                               description='Robot name (empty = default_robot of '
                                           'config/common/interfaces.yaml)'),
+        DeclareLaunchArgument('store', default_value='demo_store',
+                              description='Store map directory under maps/stores'),
         DeclareLaunchArgument('person_limit', default_value='true',
                               description='The person detector runs: the executor '
                                           'watches it and tells the operator when silent'),

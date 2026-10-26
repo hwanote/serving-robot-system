@@ -63,7 +63,7 @@ from serving_robot_navigation.command.mission import (
     ALARM, ARRIVED, CANCEL_NAV, DONE, SEND, MissionCore, MissionParams)
 from serving_robot_navigation.command.rail import rail_poses
 from serving_robot_navigation.monitoring.detector_watch import CameraWatch, DetectorWatch
-from serving_robot_navigation.site_config import SiteConfigError, load_site
+from serving_robot_navigation.site_config import SiteConfigError, load_site, map_image_fingerprint
 
 
 class RouteExecutor(Node):
@@ -72,6 +72,7 @@ class RouteExecutor(Node):
         d = self.declare_parameter
         robot = d('robot_name', '').value   # '' = default_robot of interfaces.yaml
         d('config_dir', '')
+        d('map_yaml', '')               # map.yaml Nav2 loads (fingerprint -> mission_status.map_image)
         nm = names_for(robot, self.get_parameter('config_dir').value or None)
         d('cmd_topic', nm.topic('mission_cmd'))
         d('status_topic', nm.topic('mission_status'))
@@ -139,6 +140,7 @@ class RouteExecutor(Node):
             rail_resume_s=float(g('rail_resume_s')),
             loc_stable_s=float(g('loc_stable_s')))
         self.core = MissionCore(self.site, params)
+        self.core.map_image = map_image_fingerprint(g('map_yaml')) if g('map_yaml') else ''
 
         self.hold = False
         self.detector_watch = DetectorWatch(
