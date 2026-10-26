@@ -149,8 +149,11 @@ def _build(context, *args, **kwargs):
     if sim and with_world:
         steps.append({
             'title': '[operation_mode] Gazebo world',
+            # 'world' here is true/false (start the world?). gazebo.launch.py has its own
+            # 'world' = file name, which would inherit that 'true': pass the file explicitly.
             'actions': [include(
-                os.path.join(gazebo, 'launch', 'gazebo.launch.py'), {})],
+                os.path.join(gazebo, 'launch', 'gazebo.launch.py'),
+                {'world': 'cafe.world.sdf'})],
             'wait': {
                 'name': 'gazebo', 'args': ['--gz-topic', '/clock'],
                 'timeout': timeout,

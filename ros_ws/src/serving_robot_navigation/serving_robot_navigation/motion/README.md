@@ -16,6 +16,7 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 |---|---|
 | `person_limit.py` | `PersonLimitCore`: 사람 상태 → 속도 제한 (SLOW 선속도 0.10 m/s, 각속도 0.40 rad/s 이하, STOP 은 전진 0, 후진/회전은 SLOW 한도). `parse_message`, `parse_state` |
 | `soft_stop.py` | `LimiterCore`: 부드러운 정지(가감속 제한), 하드 스톱 즉시 0, 장애물 정지 후 재출발 규칙, 충돌 잠금. `rate_limit` |
+| `hold_recovery.py` | `HoldRecoveryCore`: 장애물 정지(hold)가 5 s 이어지고 주행 목표가 없으면 **제자리 회전만**으로 트인 방향을 찾아 빠져나옴(후진·전진 없음). `heading_options` |
 
 ## 노드 (`scripts/motion/`)
 
@@ -23,6 +24,7 @@ Nav2 controller → cmd_vel_nav → velocity_smoother → cmd_vel_smoothed
 |---|---|---|
 | `person_speed_limiter.py` | `cmd_vel_smoothed`, `person_detection`, `scan_dynamic` | `cmd_vel_semantic`, `person_limit` (적용 중인 사람 제한) |
 | `soft_stop_limiter.py` | `cmd_vel_safe`, `collision_monitor_state`, `scan_dynamic`, `contact` | `/robot_01/cmd_vel`, `obstacle_hold`, `collision_latched`, 서비스 `clear_collision` |
+| `hold_recovery.py` | `obstacle_hold`, `scan_dynamic`, `/navigate_to_pose/_action/status` | `cmd_vel_nav` (회전 명령만, 사슬 맨 앞). `hold_recovery:=true` 일 때만 시작(맵핑 모드) |
 
 Nav2 의 `velocity_smoother`, `collision_monitor` 도 이 사슬에 속하며 `launch/motion.launch.py` 에서 같이 시작합니다.
 
@@ -42,3 +44,4 @@ Nav2 의 `velocity_smoother`, `collision_monitor` 도 이 사슬에 속하며 `l
 ## 테스트
 - `tests/robot/test_person_limit.py` : `PersonLimitCore`, `parse_*`
 - `tests/robot/test_soft_stop.py` : `LimiterCore`
+- `tests/robot/test_hold_recovery.py` : `HoldRecoveryCore`, `heading_options`

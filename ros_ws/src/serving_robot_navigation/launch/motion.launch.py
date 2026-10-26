@@ -43,6 +43,8 @@ def _modules(context, *args, **kwargs):
     rn = {'robot_name': robot} if robot else {}   # nodes read their names
     person_limit = (
         LaunchConfiguration('person_limit').perform(context).lower() == 'true')
+    hold_recovery = (
+        LaunchConfiguration('hold_recovery').perform(context).lower() == 'true')
 
     limits = load_limits(share)
     max_lin = float(limits['max_linear_mps'])
@@ -103,6 +105,20 @@ def _modules(context, *args, **kwargs):
     )
 
     modules = [smoother, monitor, limiter]
+    if hold_recovery:
+        # Mapping mode: turn in place out of an obstacle hold (never reverses).
+        lp = limiter_params(limits, params_file)
+        modules.append(Node(
+            package='serving_robot_navigation',
+            executable='hold_recovery.py',
+            name='hold_recovery',
+            output='screen',
+            parameters=[sim, rn, {
+                'resume_clear_distance_m': lp['resume_clear_distance_m'],
+                'front_m': lp['front_m'],
+                'half_width_m': lp['half_width_m'],
+            }],
+        ))
     if person_limit:
         _det_params, lim_params = person_params(limits, params_file)
         modules.append(Node(
@@ -127,6 +143,9 @@ def generate_launch_description():
         DeclareLaunchArgument('person_limit', default_value='true',
                               description='Start person_speed_limiter (person state '
                                           'limits the speed)'),
+        DeclareLaunchArgument('hold_recovery', default_value='false',
+                              description='Start hold_recovery (turns in place out of '
+                                          'an obstacle hold; mapping mode)'),
         DeclareLaunchArgument(
             'nav2_params_file',
             default_value=os.path.join(share, 'config', 'nav2.yaml'),
