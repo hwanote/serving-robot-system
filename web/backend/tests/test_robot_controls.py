@@ -159,3 +159,24 @@ def test_running_home_trip_is_kept(client):
         fleet._watch()
         assert r.homing == 'home-9997' and fleet.is_busy()
         r.homing = None
+
+
+def test_no_idle_home_for_a_robot_that_does_not_know_where_it_is(client):
+    fleet = client.app_.state.fleet
+    r = fleet.robots['robot_01']
+    sent = []
+    real = r.adapter.send_cmd
+    r.adapter.send_cmd = lambda cmd: sent.append(cmd) or real(cmd)
+    try:
+        with fleet.lock:
+            r.ms = dict(r.ms or {}, localization='UNINITIALIZED')
+            r.idle_since = time.monotonic() - 100
+            fleet._idle_home()
+            assert r.homing is None and not sent and not fleet.is_busy()
+            r.ms = dict(r.ms, localization='OK')
+            r.idle_since = time.monotonic() - 100
+            fleet._idle_home()
+            assert r.homing and sent and sent[0]['cmd'] == 'go'
+            r.homing = None
+    finally:
+        r.adapter.send_cmd = real

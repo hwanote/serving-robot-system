@@ -249,7 +249,10 @@ class FleetManager:
         now = time.monotonic()
         for r in self.robots.values():
             if r.idle_since is not None and now - r.idle_since >= self.cfg.idle_home_s \
-                    and r.active is None and not r.homing and not r.offline:
+                    and r.active is None and not r.homing and not r.offline \
+                    and (r.ms or {}).get('localization') == 'OK':
+                # (a robot that does not know where it is refuses 'go' anyway: mapping stack,
+                #  or right after a new map; sending it only made the fleet look busy)
                 self.home_count += 1
                 r.homing, r.homing_at, r.idle_since = 'home-%04d' % self.home_count, now, None
                 self.note('%s idle for %.0f s: going home (%s)'
