@@ -10,6 +10,7 @@ import type {
   ZoneType,
 } from '../types/contracts'
 import { isInsideMap, normalizeYaw, roundTo, type MapGeometry } from './coordinates'
+import { isManualWaypoint, markManual } from './manualStop'
 
 // ---------- ID / label ----------
 
@@ -224,7 +225,7 @@ export function toSemanticPayload(doc: SemanticMap): SemanticMap {
       if (e.chairs) out.chairs = e.chairs.map((c) => ({ dx: c.dx, dy: c.dy, size_m: c.size_m }))
       return out
     }),
-    waypoints: doc.waypoints.map((w): Waypoint => ({ id: w.id, entity_id: w.entity_id, pose: roundPose(w.pose) })),
+    waypoints: doc.waypoints.map((w): Waypoint => markManual({ id: w.id, entity_id: w.entity_id, pose: roundPose(w.pose) }, isManualWaypoint(w))),
     zones: doc.zones.map(
       (z): Zone => ({
         id: z.id,

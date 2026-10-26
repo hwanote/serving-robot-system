@@ -6,6 +6,7 @@
 import type { Dispatch } from 'react'
 import type { MapPoint, SemanticMap, Waypoint, Zone } from '../../types/contracts'
 import { clampToImage, imageToMap, imageVectorToYaw, yawToScreenDeg, type Vec2 } from '../../utils/coordinates'
+import { isManualWaypoint } from '../../utils/manualStop'
 import { entityDisplayPose, isValidTopSize } from '../../utils/semantic'
 import type { EditorAction, Selection } from '../../utils/semanticEditor'
 import type { MapOverlayContext, MapPointerEvent } from './MapViewport'
@@ -21,12 +22,14 @@ interface Props {
   /** 강조할 목적지 entity id 목록 (Robot Control) */
   highlightIds?: string[]
   showWaypoints?: boolean
+  /** 손으로 지정한 정차 위치(manual waypoint)는 숨김: 통로 미리보기의 보라 화살표가 대신 보여준다 */
+  hideManualWaypoints?: boolean
 }
 
 /** 드래그 중 지도 밖으로 나가지 않도록 이미지 범위로 제한한 map 좌표 */
 const clampedMap = (ctx: MapOverlayContext, e: MapPointerEvent): Vec2 => imageToMap(ctx.geo, clampToImage(ctx.geo, e.image))
 
-export function SemanticLayer({ ctx, doc, selection = null, interactive = false, dispatch, highlightIds = [], showWaypoints = true }: Props) {
+export function SemanticLayer({ ctx, doc, selection = null, interactive = false, dispatch, highlightIds = [], showWaypoints = true, hideManualWaypoints = false }: Props) {
   const { px } = ctx
   const pe = interactive ? 'auto' : 'none'
 
@@ -73,7 +76,7 @@ export function SemanticLayer({ ctx, doc, selection = null, interactive = false,
 
   // ---------- Waypoint 연결선 + 화살표 ----------
   const waypointEls = showWaypoints
-    ? doc.waypoints.map((wp) => {
+    ? doc.waypoints.filter((wp) => !(hideManualWaypoints && isManualWaypoint(wp))).map((wp) => {
         const entity = doc.entities.find((e) => e.id === wp.entity_id)
         const entityPose = entity ? entityDisplayPose(doc, entity) : null
         const selected = selection?.kind === 'waypoint' && selection.id === wp.id

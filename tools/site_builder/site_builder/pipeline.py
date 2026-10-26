@@ -141,6 +141,72 @@ def _stop_for_standby(c, g, l, res):
     return {'node': nid}
 
 
+def _axis_yaw(deg, tol=1.0):
+    """East / north / west / south (within tol degrees) as -90, 0, 90, 180; otherwise None."""
+    for k in (-180, -90, 0, 90, 180):
+        if abs((deg - k + 180.0) % 360.0 - 180.0) <= tol:
+            return 180.0 if k == -180 else float(k)
+    return None
+
+
+def _stop_for_pin(c, g, l, res, blocked_at):
+    """The stop a person placed by hand: the corridor point nearest to it, facing the chosen way.
+    Same checks as a generated stop (front gap, facing the target). When they fail the label is
+    left out with the reason; it is never swapped for a generated stop."""
+    par = c.par
+    pin = l['stop']
+    want = (pin['x'], pin['y'])
+    yaw = None
+    if pin['yaw_deg'] is not None:
+        yaw = _axis_yaw(pin['yaw_deg'])
+        if yaw is None:
+            res.excluded.append({'id': l['id'], 'reason': 'pinned direction %.0f deg is not east, '
+                                 'north, west or south' % pin['yaw_deg']})
+            return None
+    best = None
+    for e in g.edges:
+        foot, _ = sg.foot_on_segment(want, g.nodes[e['a']], g.nodes[e['b']])
+        d = math.hypot(foot[0] - want[0], foot[1] - want[1])
+        if best is None or d < best[0]:
+            best = (d, e, foot)
+    if best is None or best[0] > par.snap_max_m:
+        res.excluded.append({'id': l['id'], 'reason': 'pinned stop: no corridor within %.1f m'
+                             % par.snap_max_m})
+        return None
+    _, e, foot = best
+    near = sg.nearest_node(g, foot, par.node_reuse_m)
+    pos = g.nodes[near] if near else foot
+    if l['kind'] != 'standby':
+        click = (l['x'], l['y'])
+        if yaw is None:
+            yaw = _snap_yaw(math.degrees(math.atan2(click[1] - pos[1], click[0] - pos[0])),
+                            par.yaw_snap_deg)
+        yr = math.radians(yaw)
+        front = (pos[0] + par.front_m * math.cos(yr), pos[1] + par.front_m * math.sin(yr))
+        gap = raycast(blocked_at, front, yr)
+        if gap is None:
+            res.excluded.append({'id': l['id'], 'reason': 'pinned stop: nothing in front of it '
+                                 '(it faces %.0f deg)' % yaw})
+            return None
+        if not (par.gap_lo_m <= gap <= par.gap_hi_m):
+            res.excluded.append({'id': l['id'], 'reason': 'pinned stop: front gap %.2f m is not '
+                                 'within %.2f-%.2f m' % (gap, par.gap_lo_m, par.gap_hi_m)})
+            return None
+        hit = (front[0] + gap * math.cos(yr), front[1] + gap * math.sin(yr))
+        if l['kind'] == 'table':
+            top = l.get('top_size_m') or {'x': par.default_top_m, 'y': par.default_top_m}
+            tol = math.hypot(top['x'], top['y']) / 2 + 0.15
+        else:
+            tol = 0.7
+        if math.hypot(hit[0] - click[0], hit[1] - click[1]) > tol:
+            res.excluded.append({'id': l['id'], 'reason': 'pinned stop does not face the target '
+                                 '(what is in front is %.2f m from it)'
+                                 % math.hypot(hit[0] - click[0], hit[1] - click[1])})
+            return None
+    nid = near or sg.split_edge(g, e, foot, c.clr_cell)
+    return {'node': nid, 'pin_yaw': yaw, 'pinned': True}
+
+
 def _stop_for_target(c, g, l, res, blocked_at):
     """Best corridor point that faces the labelled table / counter."""
     par = c.par
@@ -177,14 +243,13 @@ def _stop_for_target(c, g, l, res, blocked_at):
             axis = 0 if yaw in (-180.0, -90.0, 0.0, 90.0, 180.0) else 1
             key = ((axis, 0, round(gap / 0.05), d_foot) if room >= good_room
                    else (axis, 1, -round(room / 0.02), gap))
-            scored.append((key, e['id'], pos))
+            scored.append((key, e, pos))   # the edge itself: ids of edges split earlier are still ''
     if not scored:
         res.excluded.append({'id': l['id'], 'reason': 'no corridor point faces it with a front gap '
                              'of %.2f-%.2f m' % (par.gap_lo_m, par.gap_hi_m)})
         return None
     scored.sort(key=lambda t: t[0])
-    _, eid, pos = scored[0]
-    e = next(x for x in g.edges if x['id'] == eid)
+    _, e, pos = scored[0]
     nid = sg.nearest_node(g, pos, 1e-6) or sg.split_edge(g, e, pos, c.clr_cell)
     return {'node': nid}
 
@@ -266,7 +331,7 @@ def _add_approach_branches(c, g, stops, res, blocked_at):
         g.edges.append(edge)
         sg.refresh_edge(g, edge, c.clr_at)
         docks[l['id']] = dock
-        stops[l['id']] = {'node': did}
+        stops[l['id']] = {**stops[l['id']], 'node': did}
         info.update({'node': did, 'from_node': nid, 'branch_m': round(length, 3),
                      'gap_m': round(gap_now - length, 3)})
 
@@ -296,9 +361,14 @@ def generate(map_yaml, labels_src, par=None, adjustments=None):
 
     # tables and counters decide where the corridor points are; standby goes last
     stops = {}
-    for l in [x for x in c.labels if x['kind'] != 'standby'] + \
-             [x for x in c.labels if x['kind'] == 'standby']:
-        s = (_stop_for_standby(c, g, l, res) if l['kind'] == 'standby'
+    order = [x for x in c.labels if x['kind'] != 'standby'] + \
+            [x for x in c.labels if x['kind'] == 'standby']
+    # stops a person placed by hand go last: they join the nodes the others made and change nothing
+    # about where the generated stops are
+    order = [x for x in order if not x.get('stop')] + [x for x in order if x.get('stop')]
+    for l in order:
+        s = (_stop_for_pin(c, g, l, res, blocked_at) if l.get('stop')
+             else _stop_for_standby(c, g, l, res) if l['kind'] == 'standby'
              else _stop_for_target(c, g, l, res, blocked_at))
         if s:
             stops[l['id']] = s
@@ -377,7 +447,9 @@ def _poses(c, g, stops, res):
         if not s:
             continue
         x, y = g.nodes[s['node']]
-        if l['kind'] == 'standby':
+        if s.get('pin_yaw') is not None:
+            yaw = s['pin_yaw']                       # the person chose the direction
+        elif l['kind'] == 'standby':
             yaw = _incident_yaw(g, s['node'], par)
         else:   # face the clicked target again from the final node position
             yaw = _snap_yaw(math.degrees(math.atan2(l['y'] - y, l['x'] - x)), par.yaw_snap_deg)
@@ -396,6 +468,7 @@ def _poses(c, g, stops, res):
         margin = min(c.clr_at(px, py)
                      for px, py in hardstop_points(x, y, math.radians(yaw), par))
         p = {'node': s['node'], 'x': x, 'y': y, 'yaw_deg': yaw, 'aliases': aliases,
+             'pinned': bool(s.get('pinned')),
              'kind': {'table': 'table_service', 'pickup': 'pickup', 'standby': 'standby'}[l['kind']],
              'hardstop_margin_m': margin,
              'level': 'FAIL' if margin <= 0.02 else ('WARN' if margin < 0.05 else 'OK')}

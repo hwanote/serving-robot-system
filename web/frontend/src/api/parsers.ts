@@ -19,7 +19,22 @@ import {
   type Zone,
   type ZoneType,
 } from '../types/contracts'
-import type { LiveChangeResult, LiveStatus, MapBackup, RobotControls, RobotExtras, SemanticStatus, Task, TaskStateEvent } from '../types/provisional'
+import type {
+  CheckLevel,
+  GeneratedGraph,
+  GraphEdge,
+  GraphExcluded,
+  GraphNode,
+  GraphStop,
+  LiveChangeResult,
+  LiveStatus,
+  MapBackup,
+  RobotControls,
+  RobotExtras,
+  SemanticStatus,
+  Task,
+  TaskStateEvent,
+} from '../types/provisional'
 
 export class ContractError extends Error {
   constructor(message: string) {
@@ -111,6 +126,7 @@ function parseWaypoint(value: unknown, i: number): Waypoint {
     id: str(o.id, `waypoints[${i}].id`),
     entity_id: str(o.entity_id, `waypoints[${i}].entity_id`),
     pose: parsePose(o.pose, `waypoints[${i}].pose`),
+    ...(o.manual === true ? { manual: true } : {}), // 손으로 지정한 정차 위치 (임시 확장)
   }
 }
 
@@ -288,4 +304,85 @@ export function parseSemanticStatus(value: unknown): SemanticStatus {
     }
   }
   return { draft, applied, in_sync: o.in_sync === true }
+}
+
+// ---------- 자동 생성 통로 미리보기 ----------
+
+const CHECK_LEVELS: readonly string[] = ['OK', 'WARN', 'FAIL']
+const STOP_KINDS: readonly string[] = ['table_service', 'pickup', 'standby']
+
+function checkLevel(value: unknown, where: string): CheckLevel {
+  if (typeof value === 'string' && CHECK_LEVELS.includes(value)) return value as CheckLevel
+  throw new ContractError(`${where}: OK/WARN/FAIL 이 아닙니다.`)
+}
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((x): x is string => typeof x === 'string') : []
+}
+function optNum(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+export function parseGeneratedGraph(value: unknown): GeneratedGraph {
+  const o = obj(value, 'graph')
+  const nodes = arr(o.nodes, 'graph.nodes').map((n, i): GraphNode => {
+    const w = `graph.nodes[${i}]`
+    const x = obj(n, w)
+    return { id: str(x.id, `${w}.id`), x: num(x.x, `${w}.x`), y: num(x.y, `${w}.y`), level: checkLevel(x.level, `${w}.level`) }
+  })
+  const nodeIds = new Set(nodes.map((n) => n.id))
+  const edges = arr(o.edges, 'graph.edges').map((e, i): GraphEdge => {
+    const w = `graph.edges[${i}]`
+    const x = obj(e, w)
+    const from = str(x.from, `${w}.from`)
+    const to = str(x.to, `${w}.to`)
+    if (!nodeIds.has(from) || !nodeIds.has(to)) throw new ContractError(`${w}: 없는 노드를 가리킵니다.`)
+    return { id: str(x.id, `${w}.id`), from, to, length_m: num(x.length_m, `${w}.length_m`), level: checkLevel(x.level, `${w}.level`) }
+  })
+  const stops = arr(o.stops, 'graph.stops').map((s, i): GraphStop => {
+    const w = `graph.stops[${i}]`
+    const x = obj(s, w)
+    const kind = str(x.kind, `${w}.kind`)
+    if (!STOP_KINDS.includes(kind)) throw new ContractError(`${w}.kind: 알 수 없는 종류입니다.`)
+    return {
+      id: str(x.id, `${w}.id`),
+      entity_id: optStr(x.entity_id, `${w}.entity_id`),
+      node: str(x.node, `${w}.node`),
+      x: num(x.x, `${w}.x`),
+      y: num(x.y, `${w}.y`),
+      yaw: num(x.yaw, `${w}.yaw`),
+      yaw_deg: num(x.yaw_deg, `${w}.yaw_deg`),
+      kind: kind as GraphStop['kind'],
+      level: checkLevel(x.level, `${w}.level`),
+      pinned: x.pinned === true,
+    }
+  })
+  const excluded = arr(o.excluded ?? [], 'graph.excluded').map((e, i): GraphExcluded => {
+    const w = `graph.excluded[${i}]`
+    const x = obj(e, w)
+    const reason = typeof x.reason_ko === 'string' ? x.reason_ko : typeof x.reason === 'string' ? x.reason : ''
+    const pin = x.pin ? obj(x.pin, `${w}.pin`) : null
+    return {
+      id: str(x.id, `${w}.id`),
+      entity_id: optStr(x.entity_id, `${w}.entity_id`),
+      reason,
+      x: optNum(x.x),
+      y: optNum(x.y),
+      pin: pin ? { x: num(pin.x, `${w}.pin.x`), y: num(pin.y, `${w}.pin.y`), yaw_deg: optNum(pin.yaw_deg) } : null,
+    }
+  })
+  const sm = o.summary ? obj(o.summary, 'graph.summary') : {}
+  return {
+    source: o.source === 'config' ? 'config' : 'draft',
+    draft_sha: typeof o.draft_sha === 'string' ? o.draft_sha : '',
+    matches_applied: o.matches_applied === true,
+    ok: o.ok === true,
+    nodes,
+    edges,
+    stops,
+    excluded,
+    problems: strings(o.problems),
+    warnings: strings(o.warnings),
+    notes: strings(o.notes),
+    summary: { OK: Number(sm.OK ?? 0), WARN: Number(sm.WARN ?? 0), FAIL: Number(sm.FAIL ?? 0) },
+  }
 }

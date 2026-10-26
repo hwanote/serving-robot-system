@@ -99,6 +99,8 @@ def _check_items(doc, problems):
         p = _pose_problem(w.get('pose'), where + '.pose')
         if p:
             problems.append(p)
+        if 'manual' in w and not isinstance(w['manual'], bool):
+            problems.append('%s: manual 은 true/false 여야 합니다.' % where)
     zids = set()
     for i, z in enumerate(doc['zones']):
         where = 'zones[%d]' % i
@@ -153,6 +155,14 @@ def digest(doc):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
 
 
+def _label_id(e):
+    """Id of the site_builder label made from entity e (robot_wait_NN becomes standby_NN: the
+    names the robot side expects)."""
+    if e['type'] == 'robot_wait' and e['id'].startswith('robot_wait_'):
+        return 'standby_' + e['id'][len('robot_wait_'):]
+    return e['id']
+
+
 def to_labels(doc):
     """Semantic Map -> site_builder labels. Returns (labels document, notes)."""
     wp = {w['entity_id']: w for w in doc['waypoints']}
@@ -167,9 +177,8 @@ def to_labels(doc):
             no_pose.append(e['id'])
             continue
         kind = LABEL_KIND[e['type']]
-        lid = e['id']
-        if e['type'] == 'robot_wait' and lid.startswith('robot_wait_'):
-            lid = 'standby_' + lid[len('robot_wait_'):]      # the names the robot side expects
+        lid = _label_id(e)
+        if lid != e['id']:
             notes.append('%s 는 %s 로 이름을 바꿔 생성했어요.' % (e['id'], lid))
         lab = {'id': lid, 'kind': kind, 'x_m': float(pose['x']), 'y_m': float(pose['y'])}
         if kind == 'table':
@@ -181,6 +190,11 @@ def to_labels(doc):
             if e.get('chairs'):
                 lab['chairs'] = [{'dx': float(c['dx']), 'dy': float(c['dy']),
                                   'size_m': float(c['size_m'])} for c in e['chairs']]
+        w = wp.get(e['id'])
+        if w and w.get('manual') is True and w.get('pose'):
+            # placed by hand (dragged on the map): the generator must stand here, not choose
+            lab['stop'] = {'x_m': float(w['pose']['x']), 'y_m': float(w['pose']['y']),
+                           'yaw_deg': round(math.degrees(float(w['pose']['yaw'])), 3)}
         labels.append(lab)
     if not any(l['kind'] == 'pickup' for l in labels):
         notes.append('주방(kitchen)이 없어요: 로봇이 음료를 실을 곳이 정해지지 않았어요.')
@@ -203,6 +217,18 @@ def _ko_reason(reason):
         return '정지할 자리에 제자리 회전 여유가 부족해요. 주변 물건/벽과 거리를 확인해 주세요.'
     if reason.startswith('not connected'):
         return '첫 번째 대기 위치에서 갈 수 있는 복도와 이어지지 않아요.'
+    if reason.startswith('pinned direction'):
+        return '지정한 방향이 동·서·남·북 중 하나가 아니에요. 4방향 중에서 골라 주세요.'
+    if reason.startswith('pinned stop: no corridor'):
+        return '지정한 위치 가까이(1.5 m 안)에 통로가 없어요. 통로 쪽으로 옮겨 주세요.'
+    if reason.startswith('pinned stop: nothing in front'):
+        return '지정한 방향 앞에 테이블이나 벽이 없어요. 방향을 바꿔 주세요.'
+    if reason.startswith('pinned stop: front gap'):
+        m = re.search(r'front gap ([0-9.]+) m', reason)
+        return ('지정한 위치는 앞 간격%s이 기준(0.20~0.90 m)을 벗어나요. 대상에 더 가깝거나 멀게 옮겨 주세요.'
+                % (' %.2f m' % float(m.group(1)) if m else ''))
+    if reason.startswith('pinned stop does not face'):
+        return '지정한 위치와 방향이 대상을 바라보지 않아요. 방향을 바꾸거나 대상 쪽으로 옮겨 주세요.'
     return reason
 
 
@@ -311,8 +337,57 @@ class SemanticStore:
             notes = notes + _approach_notes(pv.get('approach') or {})
             return self._write(res, pv, labels, notes, doc)
 
-    def _reject_if_bad(self, res, pv):
+    def graph(self, doc=None):
+        """The nodes, corridors and stop poses the generator makes from `doc` (an unsaved edit), else
+        from the saved draft (from config/common when nothing is saved), WITHOUT writing anything.
+        A waypoint with manual: true is a stop the person placed by hand; the generator must stand
+        there (snapped to the nearest corridor point) and says why when it cannot.
+
+        Unlike apply it also answers when apply would reject the draft: ok is False and the
+        reasons are listed, so the person can see on the map where the problem is. Only when
+        no graph can be built at all (bad labels, no corridor) is it an error (422)."""
+        source = 'draft'
+        if doc is None:
+            doc = self.load_draft()
+        if doc is None:
+            doc, source = self.site.semantics, 'config'
+        sb_labels, sb_params, sb_pipeline = self._site_builder()
+        labels, notes = to_labels(doc)
+        try:
+            res = sb_pipeline.generate(self.site.map_yaml_path, labels,
+                                       sb_params.load_params(self.repo))
+        except sb_labels.LabelError as e:
+            raise SemanticError(422, 'INVALID_LABELS', str(e))
+        except sb_pipeline.PipelineError as e:
+            raise SemanticError(422, 'GENERATION_FAILED', '자동 노드 생성에 실패했어요: %s' % e)
+        pv = sb_pipeline.to_preview(res)
+        fails, excluded, lines = self._collect_problems(res, pv)
+        notes = notes + _approach_notes(pv.get('approach') or {})
+        entity_of = {_label_id(e): e['id'] for e in doc['entities']}
+        applied = _read_json(os.path.join(self._gen_dir, 'applied.json'))
+        sha = digest(doc)
+        stops = []
+        for lid, p in pv['poses'].items():
+            stops.append({'id': lid, 'entity_id': entity_of.get(lid), 'node': p['node'],
+                          'x': p['x'], 'y': p['y'], 'yaw_deg': p['yaw_deg'],
+                          'yaw': round(math.radians(p['yaw_deg']), 4), 'kind': p['kind'],
+                          'level': p['level'], 'hardstop_margin_m': p['hardstop_margin_m'],
+                          'faces': p.get('faces'), 'pinned': bool(p.get('pinned'))})
+        for x in excluded:
+            x['entity_id'] = entity_of.get(x['id'])
+        return {'store_id': self.site.store_id, 'source': source,
+                'map_revision': doc['map_revision'], 'draft_sha': sha,
+                'matches_applied': bool(applied and applied.get('source_sha') == sha),
+                'ok': not fails and not excluded,
+                'nodes': [{'id': k, **v} for k, v in pv['nodes'].items()],
+                'edges': pv['edges'], 'stops': stops, 'excluded': excluded,
+                'problems': lines, 'warnings': pv['warnings'], 'notes': notes,
+                'summary': {k: pv['summary'].get(k, 0) for k in ('OK', 'WARN', 'FAIL')}}
+
+    def _collect_problems(self, res, pv):
         pts = [(l['id'], l['x'], l['y']) for l in res.labels]
+        at = {i: (x, y) for i, x, y in pts}
+        pin_of = {l['id']: l['stop'] for l in res.labels if l.get('stop')}
 
         def near(a, b=None):
             """The three points closest to a node (a) or a corridor (segment a-b): where to look."""
@@ -338,10 +413,11 @@ class SemanticStore:
         for n, p in pv['poses'].items():
             if p['level'] == 'FAIL':
                 fails.append({'kind': 'pose', 'id': n, 'near': [n]})
-        excluded = [{'id': x['id'], 'reason': x['reason'], 'reason_ko': _ko_reason(x['reason'])}
+        excluded = [{'id': x['id'], 'reason': x['reason'], 'reason_ko': _ko_reason(x['reason']),
+                     **({'x': at[x['id']][0], 'y': at[x['id']][1]} if x['id'] in at else {}),
+                     **({'pin': {'x': pin_of[x['id']]['x'], 'y': pin_of[x['id']]['y'],
+                                 'yaw_deg': pin_of[x['id']]['yaw_deg']}} if x['id'] in pin_of else {})}
                     for x in pv['excluded']]
-        if not fails and not excluded:
-            return
         lines = ['· %s: %s' % (x['id'], x['reason_ko']) for x in excluded]
         for f in fails:
             what = {'node': '노드 %s(%.2f, %.2f)의 회전 여유가 부족해요' % (f['id'], f['x'], f['y'])
@@ -349,6 +425,12 @@ class SemanticStore:
                     'edge': '통로 %s 가 로봇 폭에 비해 좁아요' % f['id'],
                     'pose': '%s 의 정지 위치가 안전 기준을 통과하지 못했어요' % f['id']}[f['kind']]
             lines.append('· %s (가까운 점: %s)' % (what, ', '.join(f['near'])))
+        return fails, excluded, lines
+
+    def _reject_if_bad(self, res, pv):
+        fails, excluded, lines = self._collect_problems(res, pv)
+        if not fails and not excluded:
+            return
         raise SemanticError(
             422, 'GENERATION_REJECTED',
             '자동 노드 생성에서 문제가 있어 적용하지 않았어요(초안은 저장돼 있어요). '

@@ -4,11 +4,13 @@
  * 상태는 메모리에만 두고 새로고침하면 초기화된다.
  */
 import { delay, http, HttpResponse } from 'msw'
+import { parseSemanticMap } from '../api/parsers'
 import { API_BASE_URL } from '../config/env'
 import type { SemanticMap } from '../types/contracts'
 import { hasErrors, validateSemanticMap } from '../utils/semantic'
 import { mockDb } from './db'
 import { MOCK_STORE_ID } from './fixtures'
+import { buildMockGraph } from './graphFixture'
 
 const api = (path: string) => `${API_BASE_URL}/api/stores/:storeId/semantics${path}`
 
@@ -109,6 +111,30 @@ export const liveMapHandlers = [
       applied: state.applied && { ...state.applied, notes: [], warnings: [] },
       in_sync: state.applied?.source_sha === sha,
     })
+  }),
+
+  http.get(api('/graph'), async ({ params }) => {
+    await pause()
+    if (params.storeId !== MOCK_STORE_ID || !mockDb.semantics) return fail(404, 'NO_SEMANTICS', 'Semantic Map이 없습니다.')
+    const sha = draftSha()!
+    const graph = buildMockGraph(mockDb.semantics, sha, state.applied?.source_sha === sha)
+    if (!graph) return fail(422, 'GENERATION_FAILED', '자동 노드 생성에 실패했어요: 통로를 만들 Waypoint가 없어요.')
+    return HttpResponse.json(graph)
+  }),
+
+  // 저장하지 않은 편집 내용으로 같은 계산 (본문 = Semantic Map)
+  http.post(api('/graph'), async ({ params, request }) => {
+    await pause()
+    if (params.storeId !== MOCK_STORE_ID) return fail(404, 'NO_SEMANTICS', 'Semantic Map이 없습니다.')
+    let doc: SemanticMap
+    try {
+      doc = parseSemanticMap(await request.json())
+    } catch (e) {
+      return fail(400, 'INVALID_SEMANTICS', `Semantic Map 형식 오류: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    const graph = buildMockGraph(doc, hash(JSON.stringify(doc)), false)
+    if (!graph) return fail(422, 'GENERATION_FAILED', '자동 노드 생성에 실패했어요: 통로를 만들 Waypoint가 없어요.')
+    return HttpResponse.json(graph)
   }),
 
   http.post(api('/apply'), async ({ params }) => {

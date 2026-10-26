@@ -7,7 +7,8 @@
     {"id": "table_01", "kind": "table",   "x_m": -1.60, "y_m": 0.65,
      "top_size_m": {"x": 0.8, "y": 0.8},   (optional)
      "chairs": [{"dx": -0.65, "dy": 0.0, "size_m": 0.45}],   (optional)
-     "aliases": []},                       (optional)
+     "aliases": [],                      (optional)
+     "stop": {"x_m": -1.6, "y_m": 0.2, "yaw_deg": 90}},   (optional: a person placed the stop by hand)
     {"id": "kitchen",  "kind": "pickup",  "x_m": -2.30, "y_m": 2.40},
     {"id": "standby_01", "kind": "standby", "x_m": -3.20, "y_m": -2.40}
   ]
@@ -17,6 +18,11 @@ with the origin and resolution of map.yaml).
 table   : centre (any point on the table) of a table to serve
 pickup  : the counter / desk where the drink is loaded; the robot faces it
 standby : where the robot waits (home); the robot is placed on the nearest corridor
+stop    : (optional, any kind) the spot a person chose for the robot to stand: the generator puts the stop
+          on the corridor point nearest to it, facing yaw_deg (east/north/west/south), and runs the
+          same checks as for a generated stop. If they fail the label is left out with the reason;
+          it is never replaced by a generated stop. yaw_deg may be omitted (table / pickup: face the
+          target; standby: along the corridor).
 """
 import json
 import math
@@ -72,6 +78,17 @@ def load_labels(source, map_revision=None):
         if raw.get('chairs'):
             lab['chairs'] = [{'dx': float(c['dx']), 'dy': float(c['dy']),
                               'size_m': float(c['size_m'])} for c in raw['chairs']]
+        st = raw.get('stop')
+        if st is not None:
+            try:
+                sx, sy = float(st['x_m']), float(st['y_m'])
+                syaw = None if st.get('yaw_deg') is None else float(st['yaw_deg'])
+            except (KeyError, TypeError, ValueError, AttributeError):
+                raise LabelError('%s (%s): stop needs the numbers x_m and y_m (yaw_deg is optional)'
+                                 % (where, lid))
+            if not (math.isfinite(sx) and math.isfinite(sy) and (syaw is None or math.isfinite(syaw))):
+                raise LabelError('%s (%s): stop values must be finite' % (where, lid))
+            lab['stop'] = {'x': sx, 'y': sy, 'yaw_deg': syaw}
         out.append(lab)
     if not any(l['kind'] == 'standby' for l in out):
         raise NoStandbyError('대기(홈) 점이 하나는 필요해요. 점이 없다면 「예시 불러오기」를 누르거나 대기 점을 찍어 주세요')

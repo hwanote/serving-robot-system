@@ -1,24 +1,28 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
 import { Icon } from '../components/common/Icon'
 import { EmptyState, ErrorState, InlineError, LoadingState } from '../components/common/StateViews'
 import { Badge } from '../components/common/StatusBadge'
 import { EditorToolbar } from '../components/map/EditorToolbar'
+import { GeneratedGraphLayer, type DraggingStop } from '../components/map/GeneratedGraphLayer'
+import { GraphPreviewPanel } from '../components/map/GraphPreviewPanel'
 import { Inspector } from '../components/map/Inspector'
 import { LivePanel } from '../components/map/LivePanel'
 import { MappingPanel } from '../components/map/MappingPanel'
-import { MapViewport, type MapPointerEvent } from '../components/map/MapViewport'
+import { MapViewport, type MapOverlayContext, type MapPointerEvent } from '../components/map/MapViewport'
 import { ZONE_STYLE } from '../components/map/mapStyles'
 import { ObjectList } from '../components/map/ObjectList'
 import { SemanticLayer, ZoneDraftLayer } from '../components/map/SemanticLayer'
 import { resolveApiUrl } from '../config/env'
+import { useGeneratedGraph } from '../hooks/useGeneratedGraph'
 import { useSemanticEditor } from '../hooks/useSemanticEditor'
 import { useStoreData } from '../state/storeDataContext'
 import { useToast } from '../state/toastContext'
-import type { Vec2 } from '../utils/coordinates'
+import { clampToImage, imageToMap, type Vec2 } from '../utils/coordinates'
 import { ENTITY_TYPE_LABEL, ZONE_NOT_APPLIED_NOTE, ZONE_TYPE_LABEL } from '../utils/labels'
+import { DEFAULT_GRAPH_LAYERS, type GraphLayers } from '../utils/graph'
 import { entityDisplayPose } from '../utils/semantic'
-import { toolEntityType, toolZoneType, type EditorTool } from '../utils/semanticEditor'
+import { editorReducer, serializeDoc, toolEntityType, toolZoneType, type EditorAction, type EditorTool } from '../utils/semanticEditor'
 
 /** 첫 꼭짓점 근처(화면 px) 클릭 시 폴리곤 닫기 */
 const CLOSE_DISTANCE_PX = 12
@@ -48,6 +52,11 @@ export function MapSetupPage() {
   const editor = useSemanticEditor()
   const { state, dispatch, dirty } = editor
   const { notify } = useToast()
+  const docKey = useMemo(() => serializeDoc(state.doc), [state.doc])
+  const graphView = useGeneratedGraph(state.doc.store_id, docKey)
+  const [graphLayers, setGraphLayers] = useState<GraphLayers>(DEFAULT_GRAPH_LAYERS)
+  const [dragStop, setDragStop] = useState<DraggingStop | null>(null)
+  const { check: checkGraph } = graphView
   const [hover, setHover] = useState<Vec2 | null>(null)
   const map = rawMap.data
   const selectedEntity = state.selection?.kind === 'entity' ? state.selection.id : null
@@ -118,6 +127,38 @@ export function MapSetupPage() {
     [state.tool, state.doc, activeWaypointTarget, dispatch, notify],
   )
 
+  // ----- 자동 정차 위치를 손으로 옮기기: 편집 내용에 반영하고 바로 생성기로 다시 검사 -----
+  const applyStopAction = useCallback(
+    (action: EditorAction) => {
+      const next = editorReducer(state, action).doc
+      dispatch(action)
+      void checkGraph(next)
+    },
+    [state, dispatch, checkGraph],
+  )
+
+  const startStopDrag = useCallback(
+    (ctx: MapOverlayContext, entityId: string, yaw: number, e: React.PointerEvent) => {
+      const svg = (e.currentTarget as SVGElement).ownerSVGElement
+      const rect = svg?.getBoundingClientRect()
+      const start = { sx: e.clientX - (rect?.left ?? 0), sy: e.clientY - (rect?.top ?? 0) }
+      let last: Vec2 | null = null
+      ctx.beginDrag(e, {
+        onMove: (ev) => {
+          // 그냥 누르기만 한 경우(몇 px 이내)는 옮김으로 보지 않는다
+          if (!last && Math.hypot(ev.screen.sx - start.sx, ev.screen.sy - start.sy) < 4) return
+          last = imageToMap(ctx.geo, clampToImage(ctx.geo, ev.image))
+          setDragStop({ entityId, x: last.x, y: last.y, yaw })
+        },
+        onEnd: () => {
+          setDragStop(null)
+          if (last) applyStopAction({ type: 'set_manual_stop', entityId, x: last.x, y: last.y, yaw })
+        },
+      })
+    },
+    [applyStopAction],
+  )
+
   // ----- 단축키 -----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -183,7 +224,19 @@ export function MapSetupPage() {
                   : false
               return (
                 <>
-                  <SemanticLayer ctx={ctx} doc={state.doc} selection={state.selection} interactive={state.tool === 'select'} dispatch={dispatch} />
+                  <SemanticLayer ctx={ctx} doc={state.doc} selection={state.selection} interactive={state.tool === 'select'} dispatch={dispatch} showWaypoints={graphLayers.myWaypoints} hideManualWaypoints={graphView.graph !== null && graphLayers.stops} />
+                  {/* 정차 화살표는 맨 위에 그린다: 파란 Waypoint 보다 먼저 눌려야 끌 수 있다 */}
+                  {graphView.graph && (
+                    <GeneratedGraphLayer
+                      ctx={ctx}
+                      graph={graphView.graph}
+                      layers={graphLayers}
+                      stale={graphView.stale}
+                      interactive={state.tool === 'select'}
+                      dragging={dragStop}
+                      onStopDragStart={(entityId, yaw, e) => startStopDrag(ctx, entityId, yaw, e)}
+                    />
+                  )}
                   {zoneType && (
                     <>
                       <ZoneDraftLayer ctx={ctx} points={state.zoneDraft} hover={nearFirst ? { x: first![0], y: first![1] } : hover} color={ZONE_STYLE[zoneType].color} />
@@ -311,6 +364,18 @@ export function MapSetupPage() {
               </div>
             </div>
           </section>
+
+          {map && (
+            <GraphPreviewPanel
+              view={graphView}
+              onCheck={() => void checkGraph(state.doc)}
+              onClear={graphView.clear}
+              layers={graphLayers}
+              onLayers={setGraphLayers}
+              onSetYaw={(entityId, x, y, yaw) => applyStopAction({ type: 'set_manual_stop', entityId, x, y, yaw })}
+              onRevert={(entityId) => applyStopAction({ type: 'clear_manual_stop', entityId })}
+            />
+          )}
 
           {map && <LivePanel storeId={state.doc.store_id} dirty={dirty} savedKey={semantics.data} onRestored={editor.replaceDraft} />}
 

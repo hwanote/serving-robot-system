@@ -4,9 +4,11 @@
  */
 import type { EntityType, MapPoint, Pose, SemanticMap, ZoneType } from '../types/contracts'
 import { normalizeYaw } from './coordinates'
+import { isManualWaypoint, markManual, snapAxisYaw } from './manualStop'
 import {
   defaultLabel,
   defaultWaypointPose,
+  entityDisplayPose,
   nextEntityId,
   nextZoneId,
   toSemanticPayload,
@@ -55,6 +57,10 @@ export type EditorAction =
   | { type: 'set_waypoint'; entityId: string; pose: Pose; record?: boolean }
   | { type: 'move_waypoint'; id: string; x: number; y: number; record?: boolean }
   | { type: 'set_waypoint_yaw'; id: string; yaw: number; record?: boolean }
+  /** 자동 정차 위치를 손으로 옮김/방향 지정: 그 객체의 waypoint 를 수동(manual)으로 만든다 (방향은 동·서·남·북으로 맞춤) */
+  | { type: 'set_manual_stop'; entityId: string; x: number; y: number; yaw: number; record?: boolean }
+  /** 수동 지정을 지우고 waypoint 를 기본 위치로 되돌림 (정차 위치는 다시 생성기가 정함) */
+  | { type: 'clear_manual_stop'; entityId: string }
   | { type: 'zone_add_point'; point: MapPoint }
   | { type: 'zone_undo_point' }
   | { type: 'zone_finish' }
@@ -182,6 +188,25 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
         },
         a.record,
       )
+
+    case 'set_manual_stop': {
+      if (!doc.entities.some((e) => e.id === a.entityId)) return { ...s, notice: '존재하지 않는 객체입니다.' }
+      const pose: Pose = { x: a.x, y: a.y, yaw: snapAxisYaw(a.yaw) }
+      const existing = doc.waypoints.find((w) => w.entity_id === a.entityId)
+      const waypoints = existing
+        ? doc.waypoints.map((w) => (w.id === existing.id ? markManual({ ...w, pose }, true) : w))
+        : [...doc.waypoints, markManual({ id: waypointIdFor(a.entityId), entity_id: a.entityId, pose }, true)]
+      return commit(s, { ...doc, waypoints }, a.record)
+    }
+
+    case 'clear_manual_stop': {
+      const entity = doc.entities.find((e) => e.id === a.entityId)
+      const existing = doc.waypoints.find((w) => w.entity_id === a.entityId)
+      if (!entity || !existing || !isManualWaypoint(existing)) return s
+      const at = entityDisplayPose(doc, entity)
+      const pose = at ? defaultWaypointPose(entity.type, at) : existing.pose
+      return commit(s, { ...doc, waypoints: doc.waypoints.map((w) => (w.id === existing.id ? markManual({ ...w, pose }, false) : w)) })
+    }
 
     case 'zone_add_point':
       if (!toolZoneType(s.tool)) return s

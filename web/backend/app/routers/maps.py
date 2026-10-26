@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 
-from ..semantics import SemanticError
+from ..semantics import SemanticError, validate
 from .errors import err
 
 router = APIRouter()
@@ -89,6 +89,37 @@ def semantics_status(store_id: str, request: Request):
     if store_id != state.site.store_id:
         return _no_semantics()
     return state.semantics.status()
+
+
+@router.get('/api/stores/{store_id}/semantics/graph')
+async def semantics_graph(store_id: str, request: Request):
+    """The corridors, nodes and stop poses the node generator makes from the saved draft.
+    Writes nothing, and answers (ok: false + the reasons) even when apply would reject the draft."""
+    state = request.app.state
+    if store_id != state.site.store_id:
+        return _no_semantics()
+    try:
+        return await run_in_threadpool(state.semantics.graph)
+    except SemanticError as e:
+        return _semantic_err(e)
+
+
+@router.post('/api/stores/{store_id}/semantics/graph')
+async def semantics_graph_of(store_id: str, request: Request):
+    """Same as GET .../graph, but for the Semantic Map in the body (an edit that is not saved yet),
+    so a moved stop can be checked the moment it is dropped. Writes nothing."""
+    state = request.app.state
+    if store_id != state.site.store_id:
+        return _no_semantics()
+    try:
+        body = await request.json()
+    except ValueError:
+        return err(400, 'INVALID_JSON', 'JSON 형식이 아닙니다.')
+    try:
+        validate(body, state.site.store_id, state.site.revision)
+        return await run_in_threadpool(state.semantics.graph, body)
+    except SemanticError as e:
+        return _semantic_err(e)
 
 
 # ---- put the applied map into config/common (what the robots read), with dated backups

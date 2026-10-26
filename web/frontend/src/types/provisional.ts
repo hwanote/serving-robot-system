@@ -108,3 +108,72 @@ export interface RobotExtras {
   map_current?: boolean | null
   controls?: RobotControls
 }
+
+// ---------- 자동 생성 통로 미리보기 (GET /api/stores/{id}/semantics/graph) ----------
+
+export type CheckLevel = 'OK' | 'WARN' | 'FAIL'
+
+export interface GraphNode {
+  id: string
+  /** map frame (m) */
+  x: number
+  y: number
+  level: CheckLevel
+}
+
+export interface GraphEdge {
+  id: string
+  from: string
+  to: string
+  length_m: number
+  level: CheckLevel
+}
+
+/** 자동 생성이 정한 정차 위치와 방향. 로봇이 이 자리에 서서 yaw 방향을 바라본다 */
+export interface GraphStop {
+  /** 생성기가 쓰는 이름 (robot_wait_NN 은 standby_NN) */
+  id: string
+  /** 편집 화면 객체 id. 모르면 null */
+  entity_id: string | null
+  node: string
+  x: number
+  y: number
+  /** rad (map frame, 0 = +x 동쪽, π/2 = +y 북쪽) */
+  yaw: number
+  yaw_deg: number
+  kind: 'table_service' | 'pickup' | 'standby'
+  level: CheckLevel
+  /** 사람이 손으로 지정한 정차 위치인지 (waypoint.manual) */
+  pinned: boolean
+}
+
+/** 통로 위에 놓지 못한 점 */
+export interface GraphExcluded {
+  id: string
+  entity_id: string | null
+  reason: string
+  /** 점의 위치. 모르면 null */
+  x: number | null
+  y: number | null
+  /** 손으로 지정한 정차 위치가 검사에 실패한 경우, 지정한 자리와 방향 */
+  pin: { x: number; y: number; yaw_deg: number | null } | null
+}
+
+export interface GeneratedGraph {
+  /** draft = 저장한 초안으로 계산, config = 저장한 초안이 없어 로봇 지도(config/common)로 계산 */
+  source: 'draft' | 'config'
+  draft_sha: string
+  /** 지금 적용 결과가 이 초안으로 만든 것인지 */
+  matches_applied: boolean
+  /** false 면 "노드 자동 생성"이 거절될 상황 (그래도 그래프는 돌려준다) */
+  ok: boolean
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  stops: GraphStop[]
+  excluded: GraphExcluded[]
+  /** 문제 한 줄씩 (한국어) */
+  problems: string[]
+  warnings: string[]
+  notes: string[]
+  summary: { OK: number; WARN: number; FAIL: number }
+}
