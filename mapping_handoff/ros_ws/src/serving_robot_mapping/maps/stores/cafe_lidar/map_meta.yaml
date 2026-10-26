@@ -1,0 +1,20 @@
+schema_version: 1
+map_revision: 1
+frame_id: map
+source: lidar_slam
+generator: nav2_map_saver_cli
+image: map.pgm
+resolution_m: 0.05
+size_px:
+  width: 160
+  height: 120
+size_m:
+  width: 8.0
+  height: 6.0
+origin:
+  x_m: -0.782
+  y_m: -0.581
+  yaw_rad: 0.0
+exploration_outcome: COVERAGE_LIMITED
+map_complete: false
+manual_edits_applied: false
