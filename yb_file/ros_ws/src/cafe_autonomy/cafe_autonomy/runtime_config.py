@@ -26,6 +26,9 @@ def load_limits(path):
         raise ValueError('Nav2 tolerance cannot exceed arrival acceptance')
     if config['arrival']['xy_tolerance_m'] > config['arrival']['fine_engage_max_m']:
         raise ValueError('Fine engagement must cover arrival tolerance')
+    control_target=config['arrival'].get('control_xy_target_m',config['arrival']['xy_tolerance_m'])
+    if not isinstance(control_target,(int,float)) or isinstance(control_target,bool) or not math.isfinite(control_target) or not 0 < control_target <= config['arrival']['xy_tolerance_m']:
+        raise ValueError('Internal fine control target must be positive and within arrival acceptance')
     if 'dynamic_obstacles' in config:
         d=config['dynamic_obstacles']
         if not d['person_stop_m'] < config['safety']['person_slow_m'] < d['response_m'] < d['recognition_m']:

@@ -14,6 +14,9 @@ class Masks(Node):
         super().__init__('zone_masks')
         mp=Path(self.declare_parameter('map_yaml','').value)
         zones=yaml.safe_load(Path(self.declare_parameter('zones_file','').value).read_text())
+        robot_id=self.declare_parameter('robot_id','').value
+        if not robot_id:
+            raise ValueError('robot_id is required')
         meta=yaml.safe_load(mp.read_text());im=cv2.imread(str(mp.parent/meta['image']),0)
         h,w=im.shape;res=meta['resolution'];ox,oy,angle=meta['origin']
         xx,yy=np.meshgrid(np.arange(w),np.arange(h));xx=(xx+.5)*res;yy=(yy+.5)*res
@@ -22,7 +25,10 @@ class Masks(Node):
         self.pubs=[];self.msgs=[]
         for typ,key in [(0,'no_go'),(1,'slow')]:
             mask=np.zeros((h,w),dtype=np.int8)
-            for zone in zones.get(key,{}).values():
+            selected=dict(zones.get(key,{}) or {})
+            if key=='no_go':
+                selected.update((zones.get('robot_no_go',{}) or {}).get(robot_id,{}) or {})
+            for zone in selected.values():
                 bounds=zone['bounds'] if isinstance(zone,dict) else zone
                 inside=(mx>=bounds[0])&(mx<=bounds[1])&(my>=bounds[2])&(my<=bounds[3])
                 mask[inside]=100 if typ==0 else int(round(100*(1-float(zone.get('speed_ratio',.4)))))

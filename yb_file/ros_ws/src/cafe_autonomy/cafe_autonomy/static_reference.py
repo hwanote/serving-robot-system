@@ -42,3 +42,15 @@ def register_static(points,shapes,max_shift=.4,max_yaw=.2,iterations=6,match_lim
  angle=math.atan2(rotation[1,0],rotation[0,0]);shift=np.linalg.norm(rotation@centre+translation-centre)
  residual,_=closest(current,shapes);accepted=bool(abs(angle)<=max_yaw and shift<=max_shift)
  return (current if accepted else original),{'accepted':accepted,'yaw_rad':angle,'shift_m':float(shift),'median_surface_error_m':float(np.median(residual)),'rotation':rotation.tolist(),'translation':translation.tolist()}
+
+
+def static_echo(point_map, world_to_map, registration, shapes, margin):
+    """Check a current LiDAR echo against authored collision surfaces."""
+    if not registration.get('accepted') or not shapes:return False
+    ax,ay,aa=world_to_map
+    dx=point_map[0]-ax;dy=point_map[1]-ay
+    world=np.array([dx*math.cos(aa)+dy*math.sin(aa),
+                    -dx*math.sin(aa)+dy*math.cos(aa)])
+    aligned=np.asarray(registration['rotation'])@world+np.asarray(registration['translation'])
+    residual,_=closest(aligned.reshape(1,2),shapes)
+    return bool(residual[0]<=margin)

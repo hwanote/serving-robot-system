@@ -32,3 +32,12 @@ zones:
   - 2.3000000000000003
   - 2.9699999999999998
   - 4.6
+robot_no_go:
+  robot_01:
+    central_lane_trial:
+      bounds:
+      - 2.5
+      - 3.9
+      - 0.7
+      - 2.9
+  robot_02: {}

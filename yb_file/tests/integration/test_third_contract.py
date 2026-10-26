@@ -6,14 +6,14 @@ from cafe_autonomy.rotation_guard import RotationGuard
 from cafe_autonomy.policy import FleetCore,next_after_nav,may_confirm
 
 def cfg():return yaml.safe_load((root/'config/integration/runtime_limits.yaml').read_text())['navigation']
-def test_cumulative_rotation_survives_direction_reversal_until_eight_cm():
+def test_cumulative_270_is_a_monitor_not_a_command_lock():
  g=RotationGuard(cfg());g.observe(0.,0.,0.,.5,0.)
  for i in range(1,17):g.observe(0.,0.,math.radians(i*10),.5,i*.2)
  assert g.permits(.5)
- for i in range(1,3):g.observe(0.,0.,math.radians(160-i*10),-.5,4+i*.2)
- assert not g.permits(-.5) and g.reason=='CUMULATIVE_ROTATION_LIMIT'
- g.observe(.081,0.,math.radians(140),0.,5.)
- assert g.total==0. and g.reason is None
+ for i in range(1,13):g.observe(0.,0.,math.radians(160-i*10),-.5,4+i*.2)
+ assert g.snapshot()['cumulative_watch'] and g.reason is None and g.permits(-.5)
+ g.observe(.081,0.,math.radians(40),0.,7.)
+ assert not g.snapshot()['cumulative_watch'] and g.reason is None
 
 def test_continuous_limit_survives_translation_reset_of_cumulative():
  g=RotationGuard(cfg());g.observe(0.,0.,0.,.5,0.)

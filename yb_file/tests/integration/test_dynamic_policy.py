@@ -102,6 +102,84 @@ def test_detour_requests_stop_after_three_attempts():
     assert any(e['event']=='DETOUR_EXHAUSTED' for e in r['events'])
 
 
+def test_only_failed_plan_results_count_and_third_plan_is_sent():
+    p,t=fixed();step(p,t,0.)
+    first=step(p,t,30.)
+    assert first['events'][-1]['attempt']==1 and p.attempts[t.id]==0
+    assert not any(e['event']=='DYNAMIC_DETOUR_REQUEST' for e in step(p,t,35.)['events'])
+    p.detour_result([t.id],'CANCELED',35.)
+    assert p.attempts[t.id]==0
+    for now,attempt in ((40.,1),(45.,2),(50.,3)):
+        event=next(e for e in step(p,t,now)['events'] if e['event']=='DYNAMIC_DETOUR_REQUEST')
+        assert event['attempt']==attempt
+        p.detour_result([t.id],'NO_PATH',now)
+        assert p.attempts[t.id]==attempt
+    result=step(p,t,55.)
+    assert result['stage']=='DETOUR_EXHAUSTED' and result['hold_navigation']
+    assert not any(e['event']=='DYNAMIC_DETOUR_REQUEST' for e in result['events'])
+    assert [e['event'] for e in result['events']]==['DETOUR_EXHAUSTED']
+    assert not step(p,t,60.)['events']
+
+
+def test_planned_path_does_not_reset_failure_count_before_physical_clearance():
+    p,t=fixed();step(p,t,0.);step(p,t,30.)
+    p.detour_result([t.id],'EXECUTING',30.)
+    assert p.attempts[t.id]==0 and p.episodes[p.track_episode[t.id]]['active']
+    p.detour_result([t.id],'NO_PATH',31.)
+    assert p.attempts[t.id]==1
+    assert next(e for e in step(p,t,36.)['events'] if e['event']=='DYNAMIC_DETOUR_REQUEST')['attempt']==2
+
+
+def test_lidar_id_change_keeps_same_blockage_failure_history():
+    p,t=fixed();step(p,t,0.)
+    for now in (30.,35.):
+        step(p,t,now);p.detour_result([t.id],'NO_PATH',now)
+    old_episode=p.track_episode[t.id]
+    del p.tracks.items[t.id]
+    replacement=Track('new_lidar_id','person',2.,0.,.2,36.,36.,stopped_since=0.)
+    p.tracks.items[replacement.id]=replacement
+    result=step(p,replacement,40.)
+    request=next(e for e in result['events'] if e['event']=='DYNAMIC_DETOUR_REQUEST')
+    assert request['attempt']==3 and request['episode_id']==old_episode
+    assert p.attempts[replacement.id]==2
+    p.detour_result([replacement.id],'NO_PATH',40.)
+    assert step(p,replacement,45.)['stage']=='DETOUR_EXHAUSTED'
+
+
+def test_separate_blockage_does_not_inherit_failure_count():
+    p,a=fixed();step(p,a,0.)
+    for now in (30.,35.):
+        step(p,a,now);p.detour_result([a.id],'NO_PATH',now)
+    b=Track('second','person',3.2,0.,.2,36.,36.,stopped_since=0.)
+    p.tracks.items[b.id]=b
+    step(p,b,40.)
+    result=step(p,b,70.)
+    request=next(e for e in result['events'] if e['event']=='DYNAMIC_DETOUR_REQUEST' and b.id in e['track_ids'])
+    assert request['attempt']==1 and request['episode_id']!=p.track_episode[a.id]
+    assert p.attempts[b.id]==0
+
+
+def test_blockage_clearance_releases_exhausted_wait():
+    p,t=fixed();step(p,t,0.)
+    for now in (30.,35.,40.):
+        step(p,t,now);p.detour_result([t.id],'NO_PATH',now)
+    assert step(p,t,45.)['stage']=='DETOUR_EXHAUSTED'
+    t.moving=True;t.stopped_since=None;t.y=1.5
+    step(p,t,46.)
+    result=step(p,t,48.)
+    assert not result['hold_navigation'] and p.track_episode.get(t.id) is None
+
+
+def test_verified_track_removal_clears_failure_history_after_clearance():
+    p,t=fixed();step(p,t,0.)
+    for now in (30.,35.,40.):
+        step(p,t,now);p.detour_result([t.id],'NO_PATH',now)
+    episode_id=p.track_episode[t.id]
+    del p.tracks.items[t.id]  # Adapter does this only after verified_clear().
+    p.update(41.,(0.,0.,0.),0.,[(0.,0.),(4.,0.)],2.,True)
+    assert not p.episodes[episode_id]['active'] and t.id not in p.attempts
+
+
 def test_person_extent_survives_lidar_classification_dropout():
     tracks=Tracks(config());tracks.observe([(2.,0.,.25,'person')],0.,'RGBD_YOLO')
     tracks.observe([(2.,0.,.08,'unclassified_object')],.2,'LiDAR_FOREGROUND')
@@ -125,3 +203,84 @@ def test_uncertain_registration_never_mixes_motion_coordinate_frames():
         tracks.observe([(4.,3.,.2,'unclassified_object')],i*.1,'LiDAR_FOREGROUND',(0.,0.,0.),[(.8,.75)] if valid else None,0.,valid)
     track=next(iter(tracks.items.values()))
     assert not track.moving and not track.ever_moved
+
+
+def test_stationary_confirmation_keeps_first_blocked_path_after_nav_replan():
+    p=DynamicPolicy(config())
+    t=Track('object_2','unclassified_object',1.,0.,.2,0.,0.)
+    p.tracks.items[t.id]=t
+    straight=[(0.,0.),(2.,0.)]
+    bypass=[(0.,0.),(0.,1.),(2.,1.),(2.,0.)]
+    assert p.update(0.,(0.,0.,0.),0.,straight,2.,True)['tracks'][0]['blocks_path']
+    assert t.blocked_path==straight
+    t.stopped_since=0.
+    assert p.update(1.,(0.,0.,0.),0.,bypass,2.,True)['tracks'][0]['blocks_path']
+    assert t.blocked_path==straight
+    result=p.update(31.,(0.,0.,0.),0.,bypass,2.,True)
+    assert result['tracks'][0]['blocks_path']
+    assert any(e['event']=='DYNAMIC_DETOUR_REQUEST' for e in result['events'])
+
+
+def test_closest_approach_numpy_velocity_keeps_safety_report_json_serializable():
+    import json
+    import numpy as np
+    from cafe_autonomy.dynamic_policy import closest_approach
+
+    point=(.45,0.)
+    velocity=(np.float64(-.1),np.float64(0.))
+    ttc,clearance=closest_approach(point,velocity,(0.,0.,0.),.25,3.)
+    assert type(ttc) is float
+    assert type(clearance) is float
+
+    policy=DynamicPolicy(config())
+    track=Track('object_1','unclassified_object',*point,.2,0.,0.,stopped_since=0.)
+    track.vx,track.vy=velocity
+    policy.tracks.items[track.id]=track
+    report=policy.update(31.,(0.,0.,0.),.25,[(0.,0.),(3.,0.)],2.,True)
+    assert report['stop']
+    assert type(report['stop']) is bool
+    json.dumps(report)
+
+
+def test_same_path_blocking_stop_distance_for_person_and_moving_object():
+    for label in ('person', 'unclassified_object'):
+        policy = DynamicPolicy(config())
+        track = Track('target', label, 1.05, 0., .2, 0., 0., moving=True)
+        policy.tracks.items[track.id] = track
+        outside = policy.update(0., (0., 0., 0.), 0., [(0., 0.), (3., 0.)], 2., True)
+        assert not outside['stop']
+        track.x = .95
+        inside = policy.update(2., (0., 0., 0.), 0., [(0., 0.), (3., 0.)], 2., True)
+        assert inside['stop']
+
+
+def test_planned_route_clear_releases_old_risk_below_fixed_front_clearance():
+    p,t=fixed(.5,0.,.2)
+    path=[(0.,0.),(4.,0.)]
+    assert p.update(0.,(0.,0.,0.),0.,path,.6,True,planned_path=True)['stop']
+    t.x=2.;t.y=1.5;t.moving=True;t.stopped_since=None
+    assert p.update(2.,(0.,0.,0.),0.,path,.9,True,planned_path=True)['stop']
+    result=p.update(4.,(0.,0.,0.),0.,path,.9,True,planned_path=True)
+    assert not result['stop'] and result['clearance_confirmed']
+    assert result['front_clear_m']==.9 and result['blocker_ids']==[]
+
+
+def test_no_plan_keeps_old_clearance_latch_below_one_meter():
+    p,t=fixed(.5,0.,.2)
+    path=[(0.,0.),(4.,0.)]
+    assert p.update(0.,(0.,0.,0.),0.,path,.6,True)['stop']
+    t.x=2.;t.y=1.5;t.moving=True;t.stopped_since=None
+    assert p.update(4.,(0.,0.,0.),0.,path,.9,True)['stop']
+
+
+def test_same_blockage_track_id_change_does_not_repeat_stop_events_within_thirty_seconds():
+    p,t=fixed();step(p,t,0.)
+    assert [e['event'] for e in step(p,t,20.)['events']]==['BLOCKED_ALERT','REPLAN_CHECK']
+    episode_id=p.track_episode[t.id]
+    del p.tracks.items[t.id]
+    replacement=Track('replacement','person',2.,0.,.2,21.,21.,stopped_since=0.)
+    p.tracks.items[replacement.id]=replacement
+    report=step(p,replacement,22.)
+    assert p.track_episode[replacement.id]==episode_id
+    assert report['hold_navigation']
+    assert not [e for e in report['events'] if e['event'] in ('BLOCKED_ALERT','REPLAN_CHECK')]
